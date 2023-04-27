@@ -1,0 +1,6 @@
+.DS_Store
+cli/node/memcoin/memcoin
+test/private.key
+dkg/logs
+dkg/pedersen/go1.19.linux-amd64.tar.gz
+dkg/pedersen/dkgcli/dkgcli
