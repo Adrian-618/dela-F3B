@@ -589,18 +589,25 @@ func (resp VerifiableDecryptReply) Serialize(ctx serde.Context) ([]byte, error) 
 type DecPVSSReply struct {
 	//Note: Check again what is needed here and if we need the index.
 	decShares []*pvss.PubVerShare
+	index     int
 }
 
 // NewDecPVSSReply returns a new decryption reply.
-func NewDecPVSSReply(decShares []*pvss.PubVerShare) DecPVSSReply {
+func NewDecPVSSReply(decShares []*pvss.PubVerShare, pos int) DecPVSSReply {
 	return DecPVSSReply{
 		decShares: decShares,
+		index:     pos,
 	}
 }
 
 // GetShareAndProof returns ShareAndProof.
 func (resp DecPVSSReply) GetDecShares() []*pvss.PubVerShare {
 	return resp.decShares
+}
+
+// GetI returns I.
+func (resp DecPVSSReply) GetIndex() int {
+	return resp.index
 }
 
 // Serialize implements serde.Message.

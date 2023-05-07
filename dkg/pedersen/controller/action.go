@@ -208,7 +208,6 @@ type runPVSSAction struct{}
 
 // for now we simply return everything. In the future we will probably want to use only some of it.
 // accordingly, the runPVSS action returns nothing, but prints result to mimic publish?
-// Now the problem is how to add the action into the client so that it can really be used. But this is a problem for later.
 func (a runPVSSAction) Execute(ctx node.Context) ([]*pvss.PubVerShare, *share.PubPoly, kyber.Point, kyber.Scalar, error) {
 	co, err := getCollectiveAuth(ctx)
 	if err != nil {
@@ -234,6 +233,13 @@ func (a runPVSSAction) Execute(ctx node.Context) ([]*pvss.PubVerShare, *share.Pu
 	ctx.Injector.Inject(actor)
 
 	fmt.Fprintf(ctx.Out, "✅  PVSS done, actor is created.")
+
+	// here it is easily seen that we cannot return everything, but instead we need to marshal the variables
+	// and output them as strings, like in the encrypt action and verifiable encrypt action
+	// this part is a bit complicated because these variables are not simple strings, but rather slices of structs
+	// actually consider why we do the RunPVSS in the pedersen dkg instead of in geth. If only we can have the public addresses
+	// then we can directly run PVSS in geth, so that there is no need to marshal and unmarshal the variables.
+	// consider writing a function that just returns the public addresses, and then we can run PVSS in geth.
 
 	return shares, pubpoly, h, symkey, nil
 }

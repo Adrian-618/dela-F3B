@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"testing"
 
-	"crypto/sha256"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -15,11 +14,12 @@ import (
 	"go.dedis.ch/dela/mino"
 
 	"go.dedis.ch/dela/mino/minoch"
-	// "go.dedis.ch/dela/mino/minogrpc"
-	// "go.dedis.ch/dela/mino/router/tree"
+	"go.dedis.ch/dela/mino/minogrpc"
+	"go.dedis.ch/dela/mino/router/tree"
 
 	"go.dedis.ch/kyber/v3"
 	"go.dedis.ch/kyber/v3/share/pvss"
+	"go.dedis.ch/kyber/v3/xof/keccak"
 )
 
 func init() {
@@ -28,7 +28,7 @@ func init() {
 
 func Test_RunPVSS(t *testing.T) {
 	// setup up the dkg
-	n := 64
+	n := 16
 	threshold := n
 	// batchSize := 1
 
@@ -49,13 +49,13 @@ func Test_RunPVSS(t *testing.T) {
 	}
 
 	pubkeys := make([]kyber.Point, len(minos))
-	prikeys := make([]kyber.Scalar, len(minos))
+	// prikeys := make([]kyber.Scalar, len(minos))
 
 	for i, mino := range minos {
 		dkg, pubkey := NewPedersen(mino)
 		dkgs[i] = dkg
 		pubkeys[i] = pubkey
-		prikeys[i] = (*dkg).privKey
+		// prikeys[i] = (*dkg).privKey
 	}
 
 	fakeAuthority := NewAuthority(addrs, pubkeys)
@@ -92,11 +92,102 @@ func Test_RunPVSS(t *testing.T) {
 	// fmt.Println(fakebatchShares)
 	//attention! Here a random H is feed into the DecPVSS function as I disable all the related verify process in the DecPVSS function.
 	start = time.Now()
-	decKey, rcvTime, decTime, err := actors[0].DecPVSS(h, fakeAuthority, pubpoly, fakebatchShares)
+	decKey, rcvTime, decTime, err := actors[0].DecPVSS(h, pubpoly, fakebatchShares)
 	decryptionTime := time.Since(start)
 	fmt.Println("decryption time is: ", decryptionTime)
 	fmt.Println("decKey is: ", decKey)
 	fmt.Println("rcvTime and decTime(ms): ", rcvTime, decTime)
+}
+
+func Test_PVSS_minogrpc(t *testing.T) {
+	// minoch is simulated communication, and grpc is more realistic and should be used here
+
+	// setting up the dkg
+	n := 16
+	threshold := n
+
+	minos := make([]mino.Mino, n)
+	dkgs := make([]dkg.DKG, n)
+	addrs := make([]mino.Address, n)
+
+	// Here I wonder if we need the gbar for pvss. After all we don't run the DKG setup, maybe a random generator is fine?
+	agreedData := make([]byte, 32)
+	_, err := rand.Read(agreedData)
+	require.NoError(t, err)
+	// GBar := suite.Point().Embed(agreedData, keccak.New(agreedData))
+
+	t.Log("initiating the dkg nodes ...")
+	fmt.Printf("initiating the dkg nodes ...")
+
+	for i := 0; i < n; i++ {
+		addr := minogrpc.ParseAddress("127.0.0.1", 0)
+
+		minogrpc, err := minogrpc.NewMinogrpc(addr, nil, tree.NewRouter(minogrpc.NewAddressFactory()))
+		require.NoError(t, err)
+
+		defer minogrpc.GracefulStop()
+
+		minos[i] = minogrpc
+		addrs[i] = minogrpc.GetAddress()
+	}
+
+	pubkeys := make([]kyber.Point, len(minos))
+
+	for i, mino := range minos {
+		for _, m := range minos {
+			mino.(*minogrpc.Minogrpc).GetCertificateStore().Store(m.GetAddress(),
+				m.(*minogrpc.Minogrpc).GetCertificateChain())
+		}
+		dkg, pubkey := NewPedersen(mino.(*minogrpc.Minogrpc))
+		dkgs[i] = dkg
+		pubkeys[i] = pubkey
+	}
+
+	fakeAuthority := NewAuthority(addrs, pubkeys)
+
+	actors := make([]dkg.Actor, n)
+	for i := 0; i < n; i++ {
+		actor, err := dkgs[i].Listen()
+		require.NoError(t, err)
+		actors[i] = actor
+	}
+
+	t.Log("setting up the dkg ...")
+	fmt.Printf("setting up the dkg ...")
+	start := time.Now()
+	_, err = actors[0].Setup(fakeAuthority, threshold)
+	require.NoError(t, err)
+	setupTime := time.Since(start)
+
+	// here we dont need batch
+	t.Log("generaing the encrypted key shares ...")
+	fmt.Printf("generaing the encrypted key shares ...")
+
+	start = time.Now()
+	shares, pubpoly, h, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
+	encryptTime := time.Since(start)
+	// fmt.Println("encrypt time is: ", encryptTime)
+	shared := suite.Point().Mul(symkey, nil)
+	buf, err := deriveKey(shared)
+	enckey := buf[:KEY_LENGTH]
+	// fmt.Println("enckey", enckey)
+
+	fakebatchShares := [][]*pvss.PubVerShare{shares}
+	t.Log("decrypting the key shares ...")
+	fmt.Printf("decrypting the key shares ...")
+	start = time.Now()
+	decKey, rcvTime, decTime, err := actors[0].DecPVSS(h, pubpoly, fakebatchShares)
+	decryptionTime := time.Since(start)
+	require.NoError(t, err)
+
+	require.Equal(t, enckey, decKey[0])
+
+	t.Logf("n=%d, encryption time=%s, decryption time=%s, "+
+		"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
+		decryptionTime, setupTime, rcvTime, decTime)
+	fmt.Printf("n=%d, encryption time=%s, decryption time=%s, "+
+		"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
+		decryptionTime, setupTime, rcvTime, decTime)
 }
 
 func Test_RunPVSS_package(t *testing.T) {
@@ -118,11 +209,17 @@ func Test_RunPVSS_package(t *testing.T) {
 		pubkeys[i] = pubkey
 		prikeys[i] = (*dkg).privKey
 	}
-	hash := sha256.New()
-	h := suite.Point().Pick(suite.XOF(hash.Sum(nil)))
+	// hash := sha256.New()
+	// h := suite.Point().Pick(suite.XOF(hash.Sum(nil)))
+	// fmt.Println("h is: ", h)
+
+	agreedData := make([]byte, 32)
+	_, err := rand.Read(agreedData)
+	require.NoError(t, err)
+	GBar := suite.Point().Embed(agreedData, keccak.New(agreedData))
 
 	symKey := make([]byte, 24)
-	_, err := rand.Read(symKey)
+	_, err = rand.Read(symKey)
 	if err != nil {
 		panic(fmt.Sprintf("failed on load random key: %v", err))
 	}
@@ -132,7 +229,7 @@ func Test_RunPVSS_package(t *testing.T) {
 	secret := suite.Scalar().Pick(suite.RandomStream())
 	fmt.Println("secret is: ", secret)
 	//notice that here the h will be used for decryption, so we need to publish it. In this case, it is important to consider where to generate h and how to publish it.
-	encshares, poly, err := pvss.EncShares(suite, h, pubkeys, secret, n)
+	encshares, poly, err := pvss.EncShares(suite, GBar, pubkeys, secret, n)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -141,7 +238,7 @@ func Test_RunPVSS_package(t *testing.T) {
 		sH[i] = poly.Eval(encshares[i].S.I).V
 	}
 	// let's think, this verify is not accessible to non-participants because they dont know h. So we either publish h, or generate another proof.
-	K, E, err := pvss.VerifyEncShareBatch(suite, h, pubkeys, sH, encshares)
+	K, E, err := pvss.VerifyEncShareBatch(suite, GBar, pubkeys, sH, encshares)
 	fmt.Println("K is: ", K)
 	fmt.Println("E is: ", E)
 	if err != nil {
@@ -149,9 +246,10 @@ func Test_RunPVSS_package(t *testing.T) {
 	}
 	decShare := make([]*pvss.PubVerShare, n)
 	for i := 0; i < n; i++ {
-		decShare[i], err = pvss.DecShare(suite, h, pubkeys[i], sH[i], prikeys[i], encshares[i])
+		decShare[i], err = pvss.DecShare(suite, GBar, pubkeys[i], sH[i], prikeys[i], encshares[i])
 	}
 	fmt.Println("decShare: ", decShare)
+	fmt.Println("suite.Point().Base(): ", suite.Point().Base())
 	res, err := pvss.RecoverSecret(suite, suite.Point().Base(), pubkeys, encshares, decShare, n, n)
 	fmt.Println("res_test", res)
 	if err != nil {
@@ -170,111 +268,3 @@ func Test_RunPVSS_package(t *testing.T) {
 	// data, err := res.Data()
 	// fmt.Println("decKey_test", data)
 }
-
-// func Test_verifiableEncDec_minogrpc(t *testing.T) {
-// 	// we want to time the decryption for different batch sizes with different
-// 	// number of nodes
-
-// 	//numWorkersSlice := []int{8}
-// 	batchSizeSlice := []int{32}
-
-// 	// setting up the dkg
-// 	n := 64
-// 	threshold := n
-
-// 	minos := make([]mino.Mino, n)
-// 	dkgs := make([]dkg.DKG, n)
-// 	addrs := make([]mino.Address, n)
-
-// 	// Create GBar. We need a generator in order to follow the encryption and
-// 	// decryption protocol of https://arxiv.org/pdf/2205.08529.pdf. We take an
-// 	// agreed data among the participants and embed it as a point. The result is
-// 	// the generator that we are seeking.
-// 	agreedData := make([]byte, 32)
-// 	_, err := rand.Read(agreedData)
-// 	require.NoError(t, err)
-// 	GBar := suite.Point().Embed(agreedData, keccak.New(agreedData))
-
-// 	t.Log("initiating the dkg nodes ...")
-// 	fmt.Printf("initiating the dkg nodes ...")
-
-// 	for i := 0; i < n; i++ {
-// 		addr := minogrpc.ParseAddress("127.0.0.1", 0)
-
-// 		minogrpc, err := minogrpc.NewMinogrpc(addr, nil, tree.NewRouter(minogrpc.NewAddressFactory()))
-// 		require.NoError(t, err)
-
-// 		defer minogrpc.GracefulStop()
-
-// 		minos[i] = minogrpc
-// 		addrs[i] = minogrpc.GetAddress()
-// 	}
-
-// 	pubkeys := make([]kyber.Point, len(minos))
-
-// 	for i, mino := range minos {
-// 		for _, m := range minos {
-// 			mino.(*minogrpc.Minogrpc).GetCertificateStore().Store(m.GetAddress(),
-// 				m.(*minogrpc.Minogrpc).GetCertificateChain())
-// 		}
-// 		dkg, pubkey := NewPedersen(mino.(*minogrpc.Minogrpc))
-// 		dkgs[i] = dkg
-// 		pubkeys[i] = pubkey
-// 	}
-
-// 	fakeAuthority := NewAuthority(addrs, pubkeys)
-
-// 	actors := make([]dkg.Actor, n)
-// 	for i := 0; i < n; i++ {
-// 		actor, err := dkgs[i].Listen()
-// 		require.NoError(t, err)
-// 		actors[i] = actor
-// 	}
-
-// 	t.Log("setting up the dkg ...")
-// 	fmt.Printf("setting up the dkg ...")
-// 	start := time.Now()
-// 	_, err = actors[0].Setup(fakeAuthority, threshold)
-// 	require.NoError(t, err)
-// 	setupTime := time.Since(start)
-
-// 	// generating random messages in batch and encrypt them
-// 	for _, batchSize := range batchSizeSlice {
-// 		t.Logf("=== starting the process with batch size = %d === \n", batchSize)
-// 		fmt.Printf("=== starting the process with batch size = %d === \n", batchSize)
-
-// 		//workerNum = numWorkersSlice[i]
-
-// 		keys := make([][29]byte, batchSize)
-// 		var ciphertexts []types.Ciphertext
-// 		for i := 0; i < batchSize; i++ {
-// 			_, err = rand.Read(keys[i][:])
-// 			require.NoError(t, err)
-
-// 			ciphertext, remainder, err := actors[0].VerifiableEncrypt(keys[i][:], GBar)
-// 			require.NoError(t, err)
-// 			require.Len(t, remainder, 0)
-
-// 			ciphertexts = append(ciphertexts, ciphertext)
-// 		}
-
-// 		t.Log("decrypting the batch ...")
-// 		fmt.Printf("decrypting the batch ...")
-
-// 		start = time.Now()
-// 		decrypted, _, _, err := actors[0].VerifiableDecrypt(ciphertexts)
-// 		decryptionTime := time.Since(start)
-// 		require.NoError(t, err)
-
-// 		for i := 0; i < batchSize; i++ {
-// 			require.Equal(t, keys[i][:], decrypted[i])
-// 		}
-
-// 		t.Logf("n=%d, batchSize=%d,  decryption time=%s, "+
-// 			"throughput=%v[tx/s], dkg setup time=%s", n, batchSize,
-// 			decryptionTime, float64(batchSize)/decryptionTime.Seconds(), setupTime)
-// 		fmt.Printf("n=%d, batchSize=%d, decryption time=%s, "+
-// 			"throughput=%v[tx/s], dkg setup time=%s", n, batchSize,
-// 			decryptionTime, float64(batchSize)/decryptionTime.Seconds(), setupTime)
-// 	}
-// }

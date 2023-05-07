@@ -458,26 +458,26 @@ func (h *Handler) doDKG(ctx context.Context, deals cryChan[types.Deal],
 		h.Unlock()
 	}()
 
-	// h.log.Info().Str("action", "deal").Msg(newState)
-	// err := h.deal(ctx, out)
-	// if err != nil {
-	// 	return xerrors.Errorf("failed to deal: %v", err)
-	// }
+	h.log.Info().Str("action", "deal").Msg(newState)
+	err := h.deal(ctx, out)
+	if err != nil {
+		return xerrors.Errorf("failed to deal: %v", err)
+	}
 
-	// h.log.Info().Str("action", "respond").Msg(newState)
-	// err = h.respond(ctx, deals, out)
-	// if err != nil {
-	// 	return xerrors.Errorf("failed to respond: %v", err)
-	// }
+	h.log.Info().Str("action", "respond").Msg(newState)
+	err = h.respond(ctx, deals, out)
+	if err != nil {
+		return xerrors.Errorf("failed to respond: %v", err)
+	}
 
-	// h.log.Info().Str("action", "certify").Msg(newState)
-	// numResps := (len(h.startRes.getParticipants()) - 1) * (len(h.startRes.getParticipants()) - 1)
-	// err = h.certify(ctx, resps, numResps)
-	// if err != nil {
-	// 	return xerrors.Errorf("failed to certify: %v", err)
-	// }
+	h.log.Info().Str("action", "certify").Msg(newState)
+	numResps := (len(h.startRes.getParticipants()) - 1) * (len(h.startRes.getParticipants()) - 1)
+	err = h.certify(ctx, resps, numResps)
+	if err != nil {
+		return xerrors.Errorf("failed to certify: %v", err)
+	}
 
-	err := h.startRes.switchState(certified)
+	err = h.startRes.switchState(certified)
 	if err != nil {
 		return xerrors.Errorf("failed to switch state: %v", err)
 	}
@@ -604,23 +604,24 @@ func (h *Handler) certify(ctx context.Context, resps cryChan[types.Response], ex
 
 // finalize saves the result and announces it to the orchestrator.
 func (h *Handler) finalize(ctx context.Context, from mino.Address, out mino.Sender) error {
-	// // Send back the public DKG key
-	// distKey, err := h.dkg.DistKeyShare()
-	// if err != nil {
-	// 	return xerrors.Errorf("failed to get distr key: %v", err)
-	// }
+	// Send back the public DKG key
+	distKey, err := h.dkg.DistKeyShare()
+	if err != nil {
+		return xerrors.Errorf("failed to get distr key: %v", err)
+	}
 
-	// // Update the state before sending the acknowledgement to the orchestrator,
-	// // so that it can process decrypt requests right away.
-	// h.startRes.setDistKey(distKey.Public())
+	// Update the state before sending the acknowledgement to the orchestrator,
+	// so that it can process decrypt requests right away.
+	h.startRes.setDistKey(distKey.Public())
 
-	// h.Lock()
-	// h.privShare = distKey.PriShare()
-	// h.Unlock()
+	h.Lock()
+	h.privShare = distKey.PriShare()
+	h.Unlock()
 
-	// done := types.NewStartDone(distKey.Public())
+	done := types.NewStartDone(distKey.Public())
 
-	done := types.NewStartDone(h.startRes.getPublicKeys()[0])
+	// this line is specifically for the pvss test
+	// done := types.NewStartDone(h.startRes.getPublicKeys()[0])
 
 	select {
 	case err := <-out.Send(done, from):
@@ -1104,85 +1105,29 @@ func (h *Handler) verifiableDecryption(ct types.Ciphertext) (*types.ShareAndProo
 func (h *Handler) handleDecPVSS(out mino.Sender,
 	msg types.DecPVSSRequest, from mino.Address) error {
 
-	type job struct {
-		index    int               // index where to put the response
-		EncShare *pvss.PubVerShare // not checked yet, what is needed here?
+	//change this function, to use this pos so that we pass in the whole transaction shares except one for each participant.
+	pos := -1
+	for i := 0; i < len(h.startRes.getParticipants()); i++ {
+		if h.startRes.getParticipants()[i] == h.me {
+			pos = i
+			break
+		}
 	}
+	if pos == -1 {
+		return xerrors.Errorf("failed to find my position in participants")
+	}
+	// fmt.Println("index: ", pos)
 
 	EncShares := msg.GetEncShares()
-	// fmt.Println("EncShares: ", EncShares)
-	batchsize := len(EncShares)
 
-	wgBatchReply := sync.WaitGroup{}
+	EncShare := EncShares[pos]
+	ds, err := DecPVSSShare(h.privKey, EncShare)
+	decShare := []*pvss.PubVerShare{ds}
 
-	decShares := make([]*pvss.PubVerShare, batchsize)
-	jobChan := make(chan job)
-
-	// Fill the chan with jobs
-	go func() {
-		for i, es := range EncShares {
-			jobChan <- job{
-				index:    i,
-				EncShare: es,
-			}
-
-		}
-		close(jobChan)
-	}()
-
-	//n := workerNum
-	n := workerNumSlice[int64(math.Log2(float64(batchsize)))]
-
-	if batchsize < n {
-		n = batchsize
-	}
-
-	// Spins up workers to process jobs from the chan
-	for i := 0; i < n; i++ {
-		wgBatchReply.Add(1)
-		go func() {
-			defer wgBatchReply.Done()
-
-			for j := range jobChan {
-				x := h.privKey
-				// X := suite.Point().Mul(x, nil)
-				// sH := share.PubPoly.Eval
-				ds, err := DecPVSSShare(x, j.EncShare)
-				// fmt.Println("decShare: ", ds)
-				// ds, err := pvss.DecShare(suite, H, X, sH, x, j.EncShare)
-				// sp, err := h.verifiableDecryption(j.EncShare)
-
-				// TODO: what is needed here? Can we directly use the pvss package?
-				// worker used for parallel computing for batch input
-				// suite = suite, H = h(generated in RunPVSS), X = h. , x = h.privKey, encShare = EncShare
-				// The idea is that the pubkey is only needed for the verification, so we can compute it on the fly?
-				// X = suite.Point().Mul(x, nil)
-				// x is the private key of the participants. This is stored in the Pedersen struct. It remains to be seen what is the best way to get the private key.
-				// sH is the public commitment computed by evaluating the public commitment polynomial at the encrypted share's index i.  sH kyber.Point
-				// sH := make([]kyber.Point, n)
-				//
-				//	for i := 0; i < n; i++ {
-				//		sH[i] = pubPoly.Eval(encShares[i].S.I).V
-				//	}
-				//
-				if err != nil {
-					h.log.Err(err).Msg("verifiable decryption failed")
-				}
-
-				decShares[j.index] = ds
-			}
-
-		}()
-	}
-
-	wgBatchReply.Wait()
-
-	h.log.Info().Msg("sending back PVSS decrypt reply")
-
-	DecPVSSReplay := types.NewDecPVSSReply(decShares)
+	DecPVSSReplay := types.NewDecPVSSReply(decShare, pos)
 
 	errs := out.Send(DecPVSSReplay, from)
-	err := <-errs
+	err = <-errs
 	if err != nil {
 		return xerrors.Errorf("failed to send PVSS decrypt: %v", err)
 	}

@@ -26,7 +26,7 @@ func init() {
 
 func Test_verifiableEncDec_minoch(t *testing.T) {
 	// setup up the dkg
-	n := 16
+	n := 128
 	threshold := n
 	batchSize := 1
 
@@ -93,6 +93,9 @@ func Test_verifiableEncDec_minoch(t *testing.T) {
 		fmt.Println("ciphertexts: ", ciphertexts)
 	}
 
+	//have a look at the ciphertexts
+	fmt.Println("ciphertexts: ", ciphertexts[0])
+
 	t.Log("decrypting the ciphertext ...")
 
 	start := time.Now()
@@ -111,10 +114,10 @@ func Test_verifiableEncDec_minogrpc(t *testing.T) {
 	// number of nodes
 
 	//numWorkersSlice := []int{8}
-	batchSizeSlice := []int{32}
+	batchSizeSlice := []int{1024}
 
 	// setting up the dkg
-	n := 64
+	n := 128
 	threshold := n
 
 	minos := make([]mino.Mino, n)
@@ -197,7 +200,7 @@ func Test_verifiableEncDec_minogrpc(t *testing.T) {
 		fmt.Printf("decrypting the batch ...")
 
 		start = time.Now()
-		decrypted, _, _, err := actors[0].VerifiableDecrypt(ciphertexts)
+		decrypted, rcvT, decT, err := actors[0].VerifiableDecrypt(ciphertexts)
 		decryptionTime := time.Since(start)
 		require.NoError(t, err)
 
@@ -206,10 +209,11 @@ func Test_verifiableEncDec_minogrpc(t *testing.T) {
 		}
 
 		t.Logf("n=%d, batchSize=%d,  decryption time=%s, "+
-			"throughput=%v[tx/s], dkg setup time=%s", n, batchSize,
+			"throughput=%v[tx/s], dkg setup time=%s ", n, batchSize,
 			decryptionTime, float64(batchSize)/decryptionTime.Seconds(), setupTime)
 		fmt.Printf("n=%d, batchSize=%d, decryption time=%s, "+
-			"throughput=%v[tx/s], dkg setup time=%s", n, batchSize,
+			"throughput=%v[tx/s], dkg setup time=%s ", n, batchSize,
 			decryptionTime, float64(batchSize)/decryptionTime.Seconds(), setupTime)
+		fmt.Printf(" receive shares time: %d, decryption shares time: %d\n", rcvT, decT)
 	}
 }

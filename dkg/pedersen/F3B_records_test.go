@@ -43,6 +43,7 @@ func Test_F3B_records(t *testing.T) {
 	// numWorkersSlice := []int{16, 16, 32, 64, 64, 64, 64}
 	// batchSizeSlice := []int{32, 64, 128, 256, 512, 1024, 2048}
 	batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
+	// batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64}
 
 	///////////////////////////////////////////////////////// the main loop
 	//for _ ,n := range(nSlice){
@@ -97,16 +98,17 @@ func Test_F3B_records(t *testing.T) {
 	fmt.Println("setting up the dkg ...")
 	_, err = actors[0].Setup(fakeAuthority, threshold)
 	require.NoError(t, err)
-
 	//generating random messages in batch and encrypt them
 	for _, batchSize := range batchSizeSlice {
 		fmt.Printf("=== starting the process with batch size = %d === \n", batchSize)
 
-		const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		// const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		const letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
 		keys := make([][]byte, batchSize)
 		var ciphertexts []types.Ciphertext
 		for i := 0; i < batchSize; i++ {
 			keys[i] = make([]byte, 29)
+
 			for j := range keys[i] {
 				keys[i][j] = letterBytes[rand.Intn(len(letterBytes))]
 			}
@@ -115,6 +117,8 @@ func Test_F3B_records(t *testing.T) {
 			require.Len(t, remainder, 0)
 			ciphertexts = append(ciphertexts, ciphertext)
 		}
+		//have a look at the ciphertexts
+		// fmt.Println("ciphertexts: ", ciphertexts[0])
 		// decryopting the batch ciphertext message
 		fmt.Println("decrypting the batch ...")
 		_, recieveSharesTime, decryptionTime, err := actors[0].VerifiableDecrypt(ciphertexts)

@@ -145,6 +145,7 @@ type DecPVSSReply struct {
 	//Note: this part is not revised yet!! Make them consistent
 	//consider using the same one as request
 	DecShares []*PubVerShare
+	Index     int
 }
 
 type Message struct {
@@ -1045,6 +1046,7 @@ func encodeDecPVSSReply(msg types.DecPVSSReply) (Message, error) {
 
 	req := DecPVSSReply{
 		DecShares: encodedDecShares,
+		Index:     msg.GetIndex(),
 	}
 
 	return Message{DecPVSSReply: &req}, nil
@@ -1103,7 +1105,7 @@ func (f msgFormat) decodeDecPVSSReply(ctx serde.Context,
 		decodedDecShares = append(decodedDecShares, decodedDecShare)
 	}
 
-	resp := types.NewDecPVSSReply(decodedDecShares)
+	resp := types.NewDecPVSSReply(decodedDecShares, msg.Index)
 
 	return resp, nil
 }

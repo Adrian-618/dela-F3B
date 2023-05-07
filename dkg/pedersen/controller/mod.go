@@ -111,6 +111,8 @@ func (m minimal) SetCommands(builder node.Builder) {
 		},
 	)
 	sub.SetAction(builder.MakeAction(reshareAction{}))
+
+	//create subcommand for the PVSS functions, including RunPVSS and DecPVSS
 }
 
 // OnStart implements node.Initializer. It creates and registers a pedersen DKG.
