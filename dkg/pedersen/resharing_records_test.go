@@ -72,7 +72,7 @@ func TestResharingRecords(t *testing.T) {
 	/////////////////////////////////////////////////// first loop 	////////////////////////////////////////////
 	//for _, nOld := range nOldSlice {
 	fmt.Println("==============  starting the dkg ============== ")
-	fmt.Println("n old = ", nOld)
+	fmt.Println("n old = ", nOld, " n common = ", nCommon, " n new = ", nNew)
 
 	thresholdOld := nOld
 	thresholdNew := nCommon + nNew

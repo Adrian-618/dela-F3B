@@ -20,7 +20,6 @@ import (
 	"go.dedis.ch/dela/mino/router/tree"
 
 	"go.dedis.ch/kyber/v3"
-	"go.dedis.ch/kyber/v3/xof/keccak"
 )
 
 var nFlag = flag.String("n", "", "the number of committee members")
@@ -42,12 +41,12 @@ func Test_F3B_records(t *testing.T) {
 	// we want to time the decryption for different batch sizes with different number of nodes
 	// numWorkersSlice := []int{16, 16, 32, 64, 64, 64, 64}
 	// batchSizeSlice := []int{32, 64, 128, 256, 512, 1024, 2048}
-	batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024}
+	batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}
 	// batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64}
 
 	///////////////////////////////////////////////////////// the main loop
 	//for _ ,n := range(nSlice){
-	threshold := n
+	threshold := n/2 + 1
 
 	row := []string{strconv.Itoa(n)}
 
@@ -57,10 +56,11 @@ func Test_F3B_records(t *testing.T) {
 
 	// creating GBar. we need a generator in order to follow the encryption and decryption protocol of https://arxiv.org/pdf/2205.08529.pdf /
 	// we take an agreed data among the participants and embed it as a point. the result is the generator that we are seeking
-	agreedData := make([]byte, 32)
-	_, err = rand.Read(agreedData)
-	require.NoError(t, err)
-	GBar := suite.Point().Embed(agreedData, keccak.New(agreedData))
+	// agreedData := make([]byte, 32)
+	// _, err = rand.Read(agreedData)
+	// require.NoError(t, err)
+	// GBar := suite.Point().Embed(agreedData, keccak.New(agreedData))
+	// GBar, err := getGBar()
 
 	fmt.Println("initiating the dkg nodes ...")
 	for i := 0; i < n; i++ {

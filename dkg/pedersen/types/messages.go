@@ -20,7 +20,7 @@ type Ciphertext struct {
 	UBar kyber.Point  //ubar
 	E    kyber.Scalar //e
 	F    kyber.Scalar //f
-	GBar kyber.Point  // GBar
+	// GBar kyber.Point  // GBar
 }
 
 // ShareAndProof is the ShareAndProof provided by the verifiable decryption

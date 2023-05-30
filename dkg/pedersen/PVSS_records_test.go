@@ -113,8 +113,8 @@ func Test_PVSS_records(t *testing.T) {
 	enckey := buf[:KEY_LENGTH]
 	// fmt.Println("enckey", enckey)
 	//I want to calculate the data size of the shares, and pubpoly
-	fmt.Println("shares size is: ", len(shares))
-	fmt.Println("shares size is: ", *shares[0])
+	// fmt.Println("shares size is: ", len(shares))
+	// fmt.Println("shares size is: ", *shares[0])
 	// fmt.Println("pubpoly size is: ", len(pubboly))
 
 	fakebatchShares := [][]*pvss.PubVerShare{shares} // change codes later to just remove the batch

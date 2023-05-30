@@ -15,7 +15,8 @@ import (
 
 	"github.com/rs/zerolog"
 	"go.dedis.ch/dela"
-	"go.dedis.ch/dela/cosi/threshold"
+
+	// "go.dedis.ch/dela/cosi/threshold"
 	"go.dedis.ch/dela/dkg/pedersen/types"
 	"go.dedis.ch/dela/mino"
 	"go.dedis.ch/kyber/v3"
@@ -427,7 +428,8 @@ func (h *Handler) start(ctx context.Context, start types.Start, deals cryChan[ty
 	}
 
 	// create the DKG
-	t := threshold.ByzantineThreshold(len(start.GetPublicKeys()))
+	// t := threshold.ByzantineThreshold(len(start.GetPublicKeys()))
+	t := start.GetThreshold()
 	d, err := pedersen.NewDistKeyGenerator(suite, h.privKey, start.GetPublicKeys(), t)
 	if err != nil {
 		return xerrors.Errorf("failed to create new DKG: %v", err)
@@ -1033,12 +1035,13 @@ func (h *Handler) handleVerifiableDecrypt(out mino.Sender,
 //
 // See https://arxiv.org/pdf/2205.08529.pdf / section 5.4 Protocol / step 3
 func (h *Handler) checkEncryptionProof(cp types.Ciphertext) error {
-
+	// GBar, _ := getGBar()
 	tmp1 := suite.Point().Mul(cp.F, nil)
 	tmp2 := suite.Point().Mul(cp.E, cp.K)
 	w := suite.Point().Sub(tmp1, tmp2)
 
-	tmp1 = suite.Point().Mul(cp.F, cp.GBar)
+	tmp1 = suite.Point().Mul(cp.F, GBar)
+	// tmp1 = suite.Point().Mul(cp.F, cp.GBar)
 	tmp2 = suite.Point().Mul(cp.E, cp.UBar)
 	wBar := suite.Point().Sub(tmp1, tmp2)
 
@@ -1048,6 +1051,7 @@ func (h *Handler) checkEncryptionProof(cp types.Ciphertext) error {
 	cp.UBar.MarshalTo(hash)
 	w.MarshalTo(hash)
 	wBar.MarshalTo(hash)
+	hash.Write(L)
 
 	tmp := suite.Scalar().SetBytes(hash.Sum(nil))
 	if !tmp.Equal(cp.E) {
@@ -1119,6 +1123,7 @@ func (h *Handler) handleDecPVSS(out mino.Sender,
 	// fmt.Println("index: ", pos)
 
 	EncShares := msg.GetEncShares()
+	// fmt.Println("EncShares index: ", EncShares[pos].S.I)
 
 	EncShare := EncShares[pos]
 	ds, err := DecPVSSShare(h.privKey, EncShare)

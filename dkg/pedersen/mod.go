@@ -2,8 +2,11 @@ package pedersen
 
 import (
 	"crypto/sha256"
+	// "encoding/hex"
 	"fmt"
 	"math"
+
+	// "unsafe"
 
 	// "math/rand"
 	"sync"
@@ -14,6 +17,7 @@ import (
 	"go.dedis.ch/dela/crypto/ed25519"
 	"go.dedis.ch/dela/dkg"
 
+	gethcrypto "github.com/ethereum/go-ethereum/crypto"
 	"go.dedis.ch/dela/crypto"
 	"go.dedis.ch/dela/dkg/pedersen/types"
 	"go.dedis.ch/dela/internal/tracing"
@@ -25,13 +29,20 @@ import (
 	"go.dedis.ch/kyber/v3/suites"
 	"go.dedis.ch/kyber/v3/util/random"
 
-	// "go.dedis.ch/kyber/v3/xof/keccak"
+	"go.dedis.ch/kyber/v3/xof/keccak"
 	"golang.org/x/net/context"
 	"golang.org/x/xerrors"
 )
 
 // suite is the Kyber suite for Pedersen.
 var suite = suites.MustFind("Ed25519")
+
+// const GBarString string = "1d0194fdc2fa2ffcc041d3ff12045b73c86e4ff95ff662a5eee82abdf44a53c7"
+const GBarString string = "1d0194fdc2fa2ffcc041d3ff12045b73" // 32 bytes
+const blockId string = "blockchain ID"
+
+var GBar = suite.Point().Embed([]byte(GBarString), keccak.New([]byte(GBarString)))
+var L = gethcrypto.Keccak256([]byte(blockId))
 
 var (
 	// protocolNameSetup denotes the value of the protocol span tag associated
@@ -214,14 +225,13 @@ func (a *Actor) Encrypt(message []byte) (K, C kyber.Point, remainder []byte,
 // this person.
 //
 // See https://arxiv.org/pdf/2205.08529.pdf / section 5.4 Protocol / step 1
-func (a *Actor) VerifiableEncrypt(message []byte, GBar kyber.Point) (ciphertext types.Ciphertext,
+func (a *Actor) VerifiableEncrypt(message []byte, GBarAbort kyber.Point) (ciphertext types.Ciphertext,
 	remainder []byte, err error) {
 
 	if !a.startRes.Done() {
 		return types.Ciphertext{}, nil, xerrors.Errorf("you must first initialize " +
 			"DKG. Did you call setup() first?")
 	}
-
 	// Embed the message (or as much of it as will fit) into a curve point.
 	M := suite.Point().Embed(message, random.New())
 
@@ -250,6 +260,8 @@ func (a *Actor) VerifiableEncrypt(message []byte, GBar kyber.Point) (ciphertext 
 	UBar.MarshalTo(hash)
 	W.MarshalTo(hash)
 	WBar.MarshalTo(hash)
+	// implement L to prevent replay attack
+	hash.Write(L)
 
 	E := suite.Scalar().SetBytes(hash.Sum(nil))
 	F := suite.Scalar().Add(s, suite.Scalar().Mul(E, k))
@@ -260,8 +272,11 @@ func (a *Actor) VerifiableEncrypt(message []byte, GBar kyber.Point) (ciphertext 
 		UBar: UBar,
 		E:    E,
 		F:    F,
-		GBar: GBar,
+		// GBar: GBar,
 	}
+	// fmt.Println("length of ciphertext", unsafe.Sizeof(ciphertext))
+	//check the length of the ciphertext in two ways, add all length of the contents and check directly the whole length
+	// fmt.Println("length of ciphertext", len(ciphertext.K.String())+len(ciphertext.C.String())+len(ciphertext.UBar.String())+len(ciphertext.E.String())+len(ciphertext.F.String())+len(ciphertext.GBar.String()))
 
 	return ciphertext, remainder, nil
 }
@@ -295,6 +310,19 @@ func (a *Actor) RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.Pu
 
 	//notice that here the h will be used for decryption, so we need to publish it. In this case, it is important to consider where to generate h and how to publish it.
 	shares, poly, err := pvss.EncShares(suite, h, pubkeys, secret, t)
+	//check the length of shares and poly
+	// lenShare := len(shares) * (len(shares[0].S.V.String()) + 8 + len(shares[0].P.C.String()) + len(shares[0].P.R.String()) + len(shares[0].P.VG.String()) + len(shares[0].P.VH.String()))
+
+	//add everything together
+	//actually we should add h somewhere in our protocol and publish it, but for now we just dont count it
+	// fmt.Println("length of everything", lenShare+poly.GetLength()+len(shares)*8)
+	// LG := unsafe.Sizeof(poly.GetGroup())
+	// B, C := poly.Info()
+	// LC := unsafe.Sizeof(C[1])
+	// LB := unsafe.Sizeof(B)
+	// LS := unsafe.Sizeof(*shares[0])
+	// fmt.Println("length of all", LS, LG, LB, unsafe.Sizeof(poly.Commit()), LC, poly.Threshold(), len(shares)*8)
+	// fmt.Println("length of everything", int(LS)*len(shares)+int(LG)+int(LB)+int(LC)*poly.Threshold()+int(poly.Threshold())*8)
 
 	// generateShareTime := time.Since(start).Milliseconds()
 	// fmt.Println("generateShareTime is: ", generateShareTime)
@@ -313,13 +341,7 @@ func (a *Actor) RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.Pu
 	// 	fmt.Println("error in verifyEncShare", err)
 	// 	return nil, nil, nil, nil, err
 	// }
-	// now the problem is where do we put the shares. Intuitively they should be published according to the paper. In this sense we do not need to send them to the participants using messages?
-	//So when nodes are listening, there should be a verify process to get the shares corresponding to the node. TODO: check this
-	// For now an easier solution is to send the shares here via message and stream, and store them in the handler (which is not correct actually)
-	//And the process of RunPVSS should contain the listen and verify process?
-	// how can we make sure that each participant has the right shares? TODO: check this
-	//according to the enncrypt function, there is no such process to actively make sure that one node has the encrypted message.
-	//And the truth is when we're using dkgcli, the encrypted message needs to be provided for the decryption, so no need to worry.
+
 	// But surely there is a verify in decrypt function to make sure shares are received by the actor in charge. Check that for PVSS recover.
 
 	if err != nil {
@@ -332,7 +354,7 @@ func (a *Actor) RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.Pu
 	// for i := 0; i < n; i++ {
 	// 	proofs[i] = poly.Eval(shares[i].S.I).V
 	// }
-	//another thing to consider is if we need the poly and proofs. I'm writing according to ots.
+
 	return shares, poly, h, secret, nil
 }
 
@@ -567,6 +589,7 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 	// Here the batchsize is predefined in test file, every ciphertext contains 6 data as defined, K,C,U...
 	batchsize := len(ciphertexts)
 	// fmt.Println(batchsize)
+	// when batchsize is 4096 or bigger, directly set workerNum to 12, else, as original
 	workerNum := workerNumSlice[int64(math.Log2(float64(batchsize)))]
 
 	message := types.NewVerifiableDecryptRequest(ciphertexts)
@@ -578,9 +601,13 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 		return nil, 0, 0, xerrors.Errorf("failed to send verifiable decrypt request: %v", err)
 	}
 
-	responses := make([]types.VerifiableDecryptReply, len(addrs))
+	threshold := a.startRes.getThreshold()
+	// responses := make([]types.VerifiableDecryptReply, len(addrs))
+	responses := make([]types.VerifiableDecryptReply, threshold)
 	// start := time.Now()
 	// receive decrypt reply from the nodes
+
+	fmt.Println("threshold: ", threshold)
 	for i := range addrs {
 		// fmt.Println(i)
 		from, message, err := receiver.Recv(ctx)
@@ -597,6 +624,10 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 		}
 
 		responses[i] = shareAndProof
+		// exit the loop after receiving threshold number of shares
+		if i == threshold-1 {
+			break
+		}
 	}
 
 	receivingSharesTime := time.Since(start).Milliseconds()
@@ -620,7 +651,7 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 		workerNum = batchsize
 	}
 
-	worker := newWorker(len(addrs), decryptedMessage, responses, ciphertexts)
+	worker := newWorker(len(addrs), threshold, decryptedMessage, responses, ciphertexts)
 
 	for i := 0; i < workerNum; i++ {
 		wgBatchReply.Add(1)
@@ -643,11 +674,12 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 	return decryptedMessage, receivingSharesTime, decryptionTime, nil
 }
 
-func newWorker(numParticipants int, decryptedMessage [][]byte,
+func newWorker(numParticipants int, threshold int, decryptedMessage [][]byte,
 	responses []types.VerifiableDecryptReply, ciphertexts []types.Ciphertext) worker {
 
 	return worker{
 		numParticipants:  numParticipants,
+		threshold:        threshold,
 		decryptedMessage: decryptedMessage,
 		responses:        responses,
 		ciphertexts:      ciphertexts,
@@ -659,6 +691,7 @@ func newWorker(numParticipants int, decryptedMessage [][]byte,
 // decryptedMessage, which can be written at a provided jobIndex.
 type worker struct {
 	numParticipants  int
+	threshold        int
 	decryptedMessage [][]byte
 	ciphertexts      []types.Ciphertext
 	responses        []types.VerifiableDecryptReply
@@ -681,7 +714,7 @@ func (w worker) work(jobIndex int) error {
 		}
 	}
 
-	res, err := share.RecoverCommit(suite, pubShares, w.numParticipants, w.numParticipants)
+	res, err := share.RecoverCommit(suite, pubShares, w.threshold, w.numParticipants)
 	// fmt.Println("res:", res)
 	if err != nil {
 		return xerrors.Errorf("failed to recover the commit: %v", err)

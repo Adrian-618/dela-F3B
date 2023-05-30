@@ -513,7 +513,7 @@ func (a verifiableDecryptAction) Execute(ctx node.Context) error {
 			UBar: uBar,
 			E:    e,
 			F:    f,
-			GBar: gBar,
+			// GBar: gBar,
 		}
 
 		ciphertextSlice = append(ciphertextSlice, ciphertextStruct)

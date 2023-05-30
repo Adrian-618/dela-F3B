@@ -114,10 +114,11 @@ func Test_verifiableEncDec_minogrpc(t *testing.T) {
 	// number of nodes
 
 	//numWorkersSlice := []int{8}
-	batchSizeSlice := []int{1024}
+	// batchSizeSlice := []int{1024}
+	batchSizeSlice := []int{1}
 
 	// setting up the dkg
-	n := 128
+	n := 8
 	threshold := n
 
 	minos := make([]mino.Mino, n)
@@ -128,10 +129,11 @@ func Test_verifiableEncDec_minogrpc(t *testing.T) {
 	// decryption protocol of https://arxiv.org/pdf/2205.08529.pdf. We take an
 	// agreed data among the participants and embed it as a point. The result is
 	// the generator that we are seeking.
-	agreedData := make([]byte, 32)
-	_, err := rand.Read(agreedData)
-	require.NoError(t, err)
-	GBar := suite.Point().Embed(agreedData, keccak.New(agreedData))
+	// agreedData := make([]byte, 32)
+	// _, err := rand.Read(agreedData)
+	// require.NoError(t, err)
+	// GBar := suite.Point().Embed(agreedData, keccak.New(agreedData))
+	// GBar, err := getGBar()
 
 	t.Log("initiating the dkg nodes ...")
 	fmt.Printf("initiating the dkg nodes ...")
@@ -172,7 +174,7 @@ func Test_verifiableEncDec_minogrpc(t *testing.T) {
 	t.Log("setting up the dkg ...")
 	fmt.Printf("setting up the dkg ...")
 	start := time.Now()
-	_, err = actors[0].Setup(fakeAuthority, threshold)
+	_, err := actors[0].Setup(fakeAuthority, threshold)
 	require.NoError(t, err)
 	setupTime := time.Since(start)
 

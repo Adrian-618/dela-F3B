@@ -80,7 +80,7 @@ type Ciphertext struct {
 	UBar PublicKey // ubar
 	E    []byte    // e
 	F    []byte    // f
-	GBar PublicKey // GBar
+	// GBar PublicKey // GBar
 }
 
 type VerifiableDecryptRequest struct {
@@ -629,10 +629,10 @@ func encodeVerifiableDecryptRequest(msg types.VerifiableDecryptRequest) (Message
 			return Message{}, xerrors.Errorf("couldn't marshal F: %v", err)
 		}
 
-		GBar, err := cp.GBar.MarshalBinary()
-		if err != nil {
-			return Message{}, xerrors.Errorf("couldn't marshal GBar: %v", err)
-		}
+		// GBar, err := cp.GBar.MarshalBinary()
+		// if err != nil {
+		// 	return Message{}, xerrors.Errorf("couldn't marshal GBar: %v", err)
+		// }
 
 		encodedCp := Ciphertext{
 			C:    C,
@@ -640,7 +640,7 @@ func encodeVerifiableDecryptRequest(msg types.VerifiableDecryptRequest) (Message
 			UBar: UBar,
 			E:    E,
 			F:    F,
-			GBar: GBar,
+			// GBar: GBar,
 		}
 
 		encodedCiphertexts = append(encodedCiphertexts, encodedCp)
@@ -690,11 +690,11 @@ func (f msgFormat) decodeVerifiableDecryptRequest(ctx serde.Context,
 			return nil, xerrors.Errorf("couldn't unmarshal F: %v", err)
 		}
 
-		GBar := f.suite.Point()
-		err = GBar.UnmarshalBinary(cp.GBar)
-		if err != nil {
-			return nil, xerrors.Errorf("couldn't unmarshal GBar: %v", err)
-		}
+		// GBar := f.suite.Point()
+		// err = GBar.UnmarshalBinary(cp.GBar)
+		// if err != nil {
+		// 	return nil, xerrors.Errorf("couldn't unmarshal GBar: %v", err)
+		// }
 
 		decodedCp := types.Ciphertext{
 			K:    K,
@@ -702,7 +702,7 @@ func (f msgFormat) decodeVerifiableDecryptRequest(ctx serde.Context,
 			UBar: UBar,
 			E:    E,
 			F:    F,
-			GBar: GBar,
+			// GBar: GBar,
 		}
 		decodedCiphertexts = append(decodedCiphertexts, decodedCp)
 	}

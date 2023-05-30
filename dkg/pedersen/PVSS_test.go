@@ -103,7 +103,7 @@ func Test_PVSS_minogrpc(t *testing.T) {
 	// minoch is simulated communication, and grpc is more realistic and should be used here
 
 	// setting up the dkg
-	n := 16
+	n := 4
 	threshold := n
 
 	minos := make([]mino.Mino, n)
