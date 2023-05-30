@@ -119,7 +119,7 @@ func Test_verifiableEncDec_minogrpc(t *testing.T) {
 
 	// setting up the dkg
 	n := 8
-	threshold := n
+	threshold := n/2 + 1
 
 	minos := make([]mino.Mino, n)
 	dkgs := make([]dkg.DKG, n)

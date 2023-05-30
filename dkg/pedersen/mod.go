@@ -429,10 +429,14 @@ func (a *Actor) DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvs
 
 	//check what kinds of message we need to receive. TODO: check this
 	//check here, add the verification of the proof.
-	decShares := make([]*pvss.PubVerShare, len(addrs))
+
+	threshold := a.startRes.getThreshold()
+	decShares := make([]*pvss.PubVerShare, threshold)
+	encShares := make([]*pvss.PubVerShare, threshold)
+	pubKeys := make([]kyber.Point, threshold)
 
 	// receive decrypt reply from the nodes
-	for i := 0; i < len(addrs); i++ {
+	for i := 0; i < threshold; i++ {
 		// fmt.Println(i)
 		//bugs solved! no return value in message stream.
 		from, message, err := receiver.Recv(ctx)
@@ -451,7 +455,10 @@ func (a *Actor) DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvs
 
 		// fmt.Println(decShare.GetDecShares()[0].S)
 		position := decShare.GetIndex()
-		decShares[position] = decShare.GetDecShares()[0]
+		encShares[i] = encShare[0][position]
+		decShares[i] = decShare.GetDecShares()[0]
+		pubKeys[i] = a.startRes.getPublicKeys()[position]
+		// decShares[position] = decShare.GetDecShares()[0]
 	}
 	// fmt.Println("decPVSSShare 0: ", decPVSSShare[0])
 
@@ -462,7 +469,8 @@ func (a *Actor) DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvs
 	receivingSharesTime := time.Since(start).Milliseconds()
 	start = time.Now()
 
-	res, err := pvss.RecoverSecret(suite, suite.Point().Base(), a.startRes.getPublicKeys(), encShare[0], decShares, len(addrs), len(addrs))
+	res, err := pvss.RecoverSecret(suite, suite.Point().Base(), pubKeys, encShares, decShares, threshold, len(addrs))
+	// res, err := pvss.RecoverSecret(suite, suite.Point().Base(), a.startRes.getPublicKeys(), encShare[0], decShares, len(addrs), len(addrs))
 
 	if err != nil {
 		return [][]byte{}, 0, 0, xerrors.Errorf("failed to recover commit: %v", err)
@@ -607,7 +615,7 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 	// start := time.Now()
 	// receive decrypt reply from the nodes
 
-	fmt.Println("threshold: ", threshold)
+	// fmt.Println("threshold: ", threshold)
 	for i := range addrs {
 		// fmt.Println(i)
 		from, message, err := receiver.Recv(ctx)

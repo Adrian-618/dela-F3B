@@ -46,7 +46,7 @@ func Test_PVSS_records(t *testing.T) {
 
 	// setting up the dkg
 	// n := 128
-	threshold := n
+	threshold := n/2 + 1
 
 	row := []string{strconv.Itoa(n)}
 
