@@ -136,14 +136,10 @@ type Proof struct {
 }
 
 type DecPVSSRequest struct {
-	// it even does not need to be a pointer?TODO: check this
-	EncShares []EncPVSSShare
-	// encShares []*PubVerShare
+	EncShares [][]EncPVSSShare
 }
 
 type DecPVSSReply struct {
-	//Note: this part is not revised yet!! Make them consistent
-	//consider using the same one as request
 	DecShares []*PubVerShare
 	Index     int
 }
@@ -714,151 +710,128 @@ func (f msgFormat) decodeVerifiableDecryptRequest(ctx serde.Context,
 
 // this is implemented for the pvss part. Ultimately, we either combine together as a SMC group, or split it into individual PVSS/TDH2/IBE
 func encodeDecPVSSRequest(msg types.DecPVSSRequest) (Message, error) {
-	encShares := msg.GetEncShares()
-	// fmt.Println("encShares", encShares)
+	batchShares := msg.GetEncShares()
 	// var encodedEncShares []*PubVerShare
-	var encodedEncShares []EncPVSSShare
+	var encodedEncSharesBatch [][]EncPVSSShare
+	for _, encShares := range batchShares {
+		var encodedEncShares []EncPVSSShare
+		for _, encShare := range encShares {
+			//here we marshal everything inside, like V in S, C/R in P. And reconstruct encodedEncShares.
+			V, err := encShare.S.V.MarshalBinary()
+			if err != nil {
+				return Message{}, xerrors.Errorf("couldn't marshal S.V: %v", err)
+			}
 
-	for _, encShare := range encShares {
-		//here we marshal everything inside, like V in S, C/R in P. And reconstruct encodedEncShares.
-		V, err := encShare.S.V.MarshalBinary()
-		if err != nil {
-			return Message{}, xerrors.Errorf("couldn't marshal S.V: %v", err)
+			pc, err := encShare.P.C.MarshalBinary()
+			if err != nil {
+				return Message{}, xerrors.Errorf("couldn't marshal P.C: %v", err)
+			}
+
+			pr, err := encShare.P.R.MarshalBinary()
+			if err != nil {
+				return Message{}, xerrors.Errorf("couldn't marshal P.R: %v", err)
+			}
+
+			pvg, err := encShare.P.VG.MarshalBinary()
+			if err != nil {
+				return Message{}, xerrors.Errorf("couldn't marshal P.VG: %v", err)
+			}
+
+			pvh, err := encShare.P.VH.MarshalBinary()
+			if err != nil {
+				return Message{}, xerrors.Errorf("couldn't marshal P.VH: %v", err)
+			}
+
+			encodedEncShare := EncPVSSShare{
+				I:  encShare.S.I,
+				V:  V,
+				C:  pc,
+				R:  pr,
+				VG: pvg,
+				VH: pvh,
+			}
+
+			encodedEncShares = append(encodedEncShares, encodedEncShare) // length is n
 		}
-
-		pc, err := encShare.P.C.MarshalBinary()
-		if err != nil {
-			return Message{}, xerrors.Errorf("couldn't marshal P.C: %v", err)
-		}
-
-		pr, err := encShare.P.R.MarshalBinary()
-		if err != nil {
-			return Message{}, xerrors.Errorf("couldn't marshal P.R: %v", err)
-		}
-
-		pvg, err := encShare.P.VG.MarshalBinary()
-		if err != nil {
-			return Message{}, xerrors.Errorf("couldn't marshal P.VG: %v", err)
-		}
-
-		pvh, err := encShare.P.VH.MarshalBinary()
-		if err != nil {
-			return Message{}, xerrors.Errorf("couldn't marshal P.VH: %v", err)
-		}
-
-		// reconstruct encodedEncShare with the marshaled values
-		// here the structure should be defined again with bytes and pubkeys
-		// encodedS := PubShare{
-		// 	I: encShare.S.I,
-		// 	V: V,
-		// }
-
-		// encodedP := Proof{
-		// 	C:  pc,
-		// 	R:  pr,
-		// 	VG: pvg,
-		// 	VH: pvh,
-		// }
-
-		// encodedEncShare := &PubVerShare{
-		// 	S: encodedS,
-		// 	P: encodedP,
-		// }
-
-		// encodedEncShares = append(encodedEncShares, encodedEncShare)
-
-		encodedEncShare := EncPVSSShare{
-			I:  encShare.S.I,
-			V:  V,
-			C:  pc,
-			R:  pr,
-			VG: pvg,
-			VH: pvh,
-		}
-
-		encodedEncShares = append(encodedEncShares, encodedEncShare)
+		//check encShares
+		encodedEncSharesBatch = append(encodedEncSharesBatch, encodedEncShares) // length is batchsize
 	}
 
-	// fmt.Println("encodedEncShares", encodedEncShares)
-
 	req := DecPVSSRequest{
-		EncShares: encodedEncShares,
+		EncShares: encodedEncSharesBatch,
 	}
 
 	return Message{DecPVSSRequest: &req}, nil
 }
 
 func (f msgFormat) decodeDecPVSSRequest(ctx serde.Context, msg *DecPVSSRequest) (serde.Message, error) {
-	// fmt.Println("DecPVSSRequest", msg)
-	// now the problem is that no msg is received here?
-	encShares := msg.EncShares
-	// fmt.Println("encShares", encShares)
-	var decodedEncShares []*pvss.PubVerShare
-	// decodeEncShares := []*pvss.PubVerShare{}
+	batchEncShares := msg.EncShares
+	var decodedEncSharesBatch [][]*pvss.PubVerShare
 
-	for _, encShare := range encShares {
-		//here we unmarshal everything inside, like V in S, C/R in P. And reconstruct decodedEncShares.
-		V := f.suite.Point()
-		// err := V.UnmarshalBinary(encShare.S.V)
-		err := V.UnmarshalBinary(encShare.V)
-		if err != nil {
-			return nil, xerrors.Errorf("couldn't unmarshal S.V: %v", err)
+	// do the same as above, but in reverse to support batch
+	for _, encShares := range batchEncShares {
+		var decodedEncShares []*pvss.PubVerShare
+		for _, encShare := range encShares {
+			//here we unmarshal everything inside, like V in S, C/R in P. And reconstruct decodedEncShares.
+			V := f.suite.Point()
+			// err := V.UnmarshalBinary(encShare.S.V)
+			err := V.UnmarshalBinary(encShare.V)
+			if err != nil {
+				return nil, xerrors.Errorf("couldn't unmarshal S.V: %v", err)
+			}
+
+			C := f.suite.Scalar()
+			// err = C.UnmarshalBinary(encShare.P.C)
+			err = C.UnmarshalBinary(encShare.C)
+			if err != nil {
+				return nil, xerrors.Errorf("couldn't unmarshal P.C: %v", err)
+			}
+
+			R := f.suite.Scalar()
+			// err = R.UnmarshalBinary(encShare.P.R)
+			err = R.UnmarshalBinary(encShare.R)
+			if err != nil {
+				return nil, xerrors.Errorf("couldn't unmarshal P.R: %v", err)
+			}
+
+			VG := f.suite.Point()
+			// err = VG.UnmarshalBinary(encShare.P.VG)
+			err = VG.UnmarshalBinary(encShare.VG)
+			if err != nil {
+				return nil, xerrors.Errorf("couldn't unmarshal P.VG: %v", err)
+			}
+
+			VH := f.suite.Point()
+			// err = VH.UnmarshalBinary(encShare.P.VH)
+			err = VH.UnmarshalBinary(encShare.VH)
+			if err != nil {
+				return nil, xerrors.Errorf("couldn't unmarshal P.VH: %v", err)
+			}
+
+			// reconstruct decodedEncShare with the unmarshaled values
+			decodedS := share.PubShare{
+				I: encShare.I,
+				V: V,
+			}
+
+			decodedP := dleq.Proof{
+				C:  C,
+				R:  R,
+				VG: VG,
+				VH: VH,
+			}
+
+			decodedEncShare := &pvss.PubVerShare{
+				S: decodedS,
+				P: decodedP,
+			}
+
+			decodedEncShares = append(decodedEncShares, decodedEncShare)
 		}
-
-		C := f.suite.Scalar()
-		// err = C.UnmarshalBinary(encShare.P.C)
-		err = C.UnmarshalBinary(encShare.C)
-		if err != nil {
-			return nil, xerrors.Errorf("couldn't unmarshal P.C: %v", err)
-		}
-
-		R := f.suite.Scalar()
-		// err = R.UnmarshalBinary(encShare.P.R)
-		err = R.UnmarshalBinary(encShare.R)
-		if err != nil {
-			return nil, xerrors.Errorf("couldn't unmarshal P.R: %v", err)
-		}
-
-		VG := f.suite.Point()
-		// err = VG.UnmarshalBinary(encShare.P.VG)
-		err = VG.UnmarshalBinary(encShare.VG)
-		if err != nil {
-			return nil, xerrors.Errorf("couldn't unmarshal P.VG: %v", err)
-		}
-
-		VH := f.suite.Point()
-		// err = VH.UnmarshalBinary(encShare.P.VH)
-		err = VH.UnmarshalBinary(encShare.VH)
-		if err != nil {
-			return nil, xerrors.Errorf("couldn't unmarshal P.VH: %v", err)
-		}
-
-		// reconstruct decodedEncShare with the unmarshaled values
-		decodedS := share.PubShare{
-			//note, here happens a useless type conversion. When encode convert int to int64, here convert int64 to int.
-			// I: encShare.S.I,
-			I: encShare.I,
-			V: V,
-		}
-
-		decodedP := dleq.Proof{
-			C:  C,
-			R:  R,
-			VG: VG,
-			VH: VH,
-		}
-
-		decodedEncShare := &pvss.PubVerShare{
-			S: decodedS,
-			P: decodedP,
-		}
-
-		decodedEncShares = append(decodedEncShares, decodedEncShare)
-
+		decodedEncSharesBatch = append(decodedEncSharesBatch, decodedEncShares)
 	}
-	// fmt.Println("decodedEncShares", decodedEncShares)
 
-	req := types.NewDecPVSSRequest(decodedEncShares)
+	req := types.NewDecPVSSRequest(decodedEncSharesBatch)
 
 	return req, nil
 }
@@ -992,9 +965,6 @@ func (f msgFormat) decodeVerifiableDecryptReply(ctx serde.Context,
 }
 
 // notice, the encshare and decshare are of the same format because of the batch process.
-// Let's say when there is no batch, every actor will decrypt one encshare *PubVerShare
-// however if we consider a batch of encshares, every actor will decrypt an array of share.
-// NOTE!! As discussed in the meeting, actually for PVSS batch operation is not practical, as we assume every transaction can pick different participants.
 // an idea, can we just use the same functions for request and reply?
 // this is actually very practical, as in both cases(with batch or without), the encshare and decshare are of the same format.
 func encodeDecPVSSReply(msg types.DecPVSSReply) (Message, error) {

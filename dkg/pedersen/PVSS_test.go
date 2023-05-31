@@ -18,6 +18,7 @@ import (
 	"go.dedis.ch/dela/mino/router/tree"
 
 	"go.dedis.ch/kyber/v3"
+	"go.dedis.ch/kyber/v3/share"
 	"go.dedis.ch/kyber/v3/share/pvss"
 	"go.dedis.ch/kyber/v3/xof/keccak"
 )
@@ -76,7 +77,7 @@ func Test_RunPVSS(t *testing.T) {
 
 	//essentailly the thing is, after dkg is set up, any actor can control the actions. Remember that PVSS actually needs a different yet simpler setup.
 	start := time.Now()
-	shares, pubpoly, h, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
+	shares, pubpoly, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
 	encryptTime := time.Since(start)
 	fmt.Println("encrypt time is: ", encryptTime)
 	shared := suite.Point().Mul(symkey, nil)
@@ -92,7 +93,7 @@ func Test_RunPVSS(t *testing.T) {
 	// fmt.Println(fakebatchShares)
 	//attention! Here a random H is feed into the DecPVSS function as I disable all the related verify process in the DecPVSS function.
 	start = time.Now()
-	decKey, rcvTime, decTime, err := actors[0].DecPVSS(h, pubpoly, fakebatchShares)
+	decKey, rcvTime, decTime, err := actors[0].DecPVSS(pubpoly, fakebatchShares)
 	decryptionTime := time.Since(start)
 	fmt.Println("decryption time is: ", decryptionTime)
 	fmt.Println("decKey is: ", decKey)
@@ -101,6 +102,8 @@ func Test_RunPVSS(t *testing.T) {
 
 func Test_PVSS_minogrpc(t *testing.T) {
 	// minoch is simulated communication, and grpc is more realistic and should be used here
+
+	batchSizeSlice := []int{64}
 
 	// setting up the dkg
 	n := 4
@@ -159,35 +162,53 @@ func Test_PVSS_minogrpc(t *testing.T) {
 	require.NoError(t, err)
 	setupTime := time.Since(start)
 
-	// here we dont need batch
-	t.Log("generaing the encrypted key shares ...")
-	fmt.Printf("generaing the encrypted key shares ...")
-
 	start = time.Now()
-	shares, pubpoly, h, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
-	encryptTime := time.Since(start)
-	// fmt.Println("encrypt time is: ", encryptTime)
-	shared := suite.Point().Mul(symkey, nil)
-	buf, err := deriveKey(shared)
-	enckey := buf[:KEY_LENGTH]
-	// fmt.Println("enckey", enckey)
+	// add batch test support
+	for _, batchSize := range batchSizeSlice {
+		t.Logf("=== starting the process with batch size = %d === \n", batchSize)
+		fmt.Printf("=== starting the process with batch size = %d === \n", batchSize)
+		var batchShares [][]*pvss.PubVerShare
+		var batchPubPoly []*share.PubPoly
+		var batchEnckey [][]byte
+		var pubpoly *share.PubPoly
+		for i := 0; i < batchSize; i++ {
+			shares, pubpoly, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
+			require.NoError(t, err)
+			shared := suite.Point().Mul(symkey, nil)
+			buf, err := deriveKey(shared)
+			enckey := buf[:KEY_LENGTH]
+			batchShares = append(batchShares, shares)
+			batchPubPoly = append(batchPubPoly, pubpoly)
+			batchEnckey = append(batchEnckey, enckey)
+		}
 
-	fakebatchShares := [][]*pvss.PubVerShare{shares}
-	t.Log("decrypting the key shares ...")
-	fmt.Printf("decrypting the key shares ...")
-	start = time.Now()
-	decKey, rcvTime, decTime, err := actors[0].DecPVSS(h, pubpoly, fakebatchShares)
-	decryptionTime := time.Since(start)
-	require.NoError(t, err)
+		// shares, pubpoly, h, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
+		encryptTime := time.Since(start)
+		// fmt.Println("encrypt time is: ", encryptTime)
+		// shared := suite.Point().Mul(symkey, nil)
+		// buf, err := deriveKey(shared)
+		// enckey := buf[:KEY_LENGTH]
+		// fmt.Println("enckey", enckey)
 
-	require.Equal(t, enckey, decKey[0])
+		// fakebatchShares := [][]*pvss.PubVerShare{shares}
+		fakebatchShares := batchShares // now it's not fake anymore
+		t.Log("decrypting the key shares ...")
+		fmt.Printf("decrypting the key shares ...")
+		start = time.Now()
+		//decPVSS need to be modified to support batch decryption for pubpoly
+		decKey, rcvTime, decTime, err := actors[0].DecPVSS(pubpoly, fakebatchShares)
+		decryptionTime := time.Since(start)
+		require.NoError(t, err)
 
-	t.Logf("n=%d, encryption time=%s, decryption time=%s, "+
-		"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
-		decryptionTime, setupTime, rcvTime, decTime)
-	fmt.Printf("n=%d, encryption time=%s, decryption time=%s, "+
-		"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
-		decryptionTime, setupTime, rcvTime, decTime)
+		require.Equal(t, batchEnckey, decKey)
+
+		t.Logf("n=%d, encryption time=%s, decryption time=%s, "+
+			"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
+			decryptionTime, setupTime, rcvTime, decTime)
+		fmt.Printf("n=%d, encryption time=%s, decryption time=%s, "+
+			"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
+			decryptionTime, setupTime, rcvTime, decTime)
+	}
 }
 
 func Test_RunPVSS_package(t *testing.T) {

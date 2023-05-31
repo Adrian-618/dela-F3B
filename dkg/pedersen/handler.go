@@ -1122,17 +1122,73 @@ func (h *Handler) handleDecPVSS(out mino.Sender,
 	}
 	// fmt.Println("index: ", pos)
 
-	EncShares := msg.GetEncShares()
-	// fmt.Println("EncShares index: ", EncShares[pos].S.I)
+	type job struct {
+		index    int // index where to put the response
+		encShare *pvss.PubVerShare
+	}
 
-	EncShare := EncShares[pos]
-	ds, err := DecPVSSShare(h.privKey, EncShare)
-	decShare := []*pvss.PubVerShare{ds}
+	EncSharesAll := msg.GetEncShares()
+	batchsize := len(EncSharesAll)
+	// extract corresponding encShare from batch
+	var EncShares []*pvss.PubVerShare
+
+	for _, encShare := range EncSharesAll {
+		EncShares = append(EncShares, encShare[pos])
+	}
+
+	// fmt.Println("EncShares: ", EncShares)
+
+	wgBatchReply := sync.WaitGroup{}
+	decShare := make([]*pvss.PubVerShare, batchsize)
+	jobChan := make(chan job, batchsize)
+
+	// Fill the chan with jobs
+	go func() {
+		for i, encShare := range EncShares {
+			jobChan <- job{
+				index:    i,
+				encShare: encShare,
+			}
+
+		}
+		close(jobChan)
+	}()
+
+	//n := workerNum
+	n := workerNumSlice[int64(math.Log2(float64(batchsize)))]
+
+	if batchsize < n {
+		n = batchsize
+	}
+
+	// Spins up workers to process jobs from the chan
+	for i := 0; i < n; i++ {
+		wgBatchReply.Add(1)
+		go func() {
+			defer wgBatchReply.Done()
+
+			for j := range jobChan {
+				sp, err := h.pvssDecryption(j.encShare)
+				if err != nil {
+					h.log.Err(err).Msg("verifiable decryption failed")
+				}
+
+				decShare[j.index] = sp
+			}
+
+		}()
+	}
+
+	wgBatchReply.Wait()
+
+	// EncShare := EncShares[pos]
+	// ds, err := DecPVSSShare(h.privKey, EncShares)
+	// decShare := ds
 
 	DecPVSSReplay := types.NewDecPVSSReply(decShare, pos)
 
 	errs := out.Send(DecPVSSReplay, from)
-	err = <-errs
+	err := <-errs
 	if err != nil {
 		return xerrors.Errorf("failed to send PVSS decrypt: %v", err)
 	}
@@ -1140,19 +1196,42 @@ func (h *Handler) handleDecPVSS(out mino.Sender,
 	return nil
 }
 
-// DecShare decrypts the encrypted share and returns the decrypted share and proof.
-// Now for simplicity I'm not verify the encShare
-// This function is modified from pvss package
-func DecPVSSShare(x kyber.Scalar, encShare *pvss.PubVerShare) (*pvss.PubVerShare, error) {
+// pvssDecryption performs the decryption of the ciphertext and returns the
+// decryption share and proof.
+//
+// See https://arxiv.org/pdf/2205.08529.pdf / section 5.4 Protocol / step 3
+func (h *Handler) pvssDecryption(encShare *pvss.PubVerShare) (*pvss.PubVerShare, error) {
 	//here needs a verify process
 	G := suite.Point().Base()
-	V := suite.Point().Mul(suite.Scalar().Inv(x), encShare.S.V) // decryption: x^{-1} * (xS)
+	//quick hack for batch decryption
+	V := suite.Point().Mul(suite.Scalar().Inv(h.privKey), encShare.S.V) // decryption: x^{-1} * (xS)
 	ps := &share.PubShare{I: encShare.S.I, V: V}
-	P, _, _, err := dleq.NewDLEQProof(suite, G, V, x)
+	P, _, _, err := dleq.NewDLEQProof(suite, G, V, h.privKey)
 	if err != nil {
 		return nil, err
 	}
-	return &pvss.PubVerShare{*ps, *P}, nil
+	ds := &pvss.PubVerShare{*ps, *P}
+	return ds, nil
+}
+
+// DecShare decrypts the encrypted share and returns the decrypted share and proof.
+// Now for simplicity I'm not verify the encShare
+// This function is modified from pvss package
+func DecPVSSShare(x kyber.Scalar, encShares []*pvss.PubVerShare) ([]*pvss.PubVerShare, error) {
+	//here needs a verify process
+	G := suite.Point().Base()
+	//quick hack for batch decryption
+	var ds []*pvss.PubVerShare
+	for _, encShare := range encShares {
+		V := suite.Point().Mul(suite.Scalar().Inv(x), encShare.S.V) // decryption: x^{-1} * (xS)
+		ps := &share.PubShare{I: encShare.S.I, V: V}
+		P, _, _, err := dleq.NewDLEQProof(suite, G, V, x)
+		if err != nil {
+			return nil, err
+		}
+		ds = append(ds, &pvss.PubVerShare{*ps, *P})
+	}
+	return ds, nil
 }
 
 // isInSlice gets an address and a slice of addresses and returns true if that

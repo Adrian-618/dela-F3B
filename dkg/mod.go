@@ -34,6 +34,6 @@ type Actor interface {
 	VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int64, int64, error)
 	VerifiableEncrypt(message []byte, GBar kyber.Point) (ciphertext types.Ciphertext, remainder []byte, err error)
 
-	RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.PubVerShare, *share.PubPoly, kyber.Point, kyber.Scalar, error)
-	DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvss.PubVerShare) ([][]byte, int64, int64, error)
+	RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.PubVerShare, *share.PubPoly, kyber.Scalar, error)
+	DecPVSS(pubpoly *share.PubPoly, encShare [][]*pvss.PubVerShare) ([][]byte, int64, int64, error)
 }

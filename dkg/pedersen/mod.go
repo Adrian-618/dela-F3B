@@ -227,6 +227,7 @@ func (a *Actor) Encrypt(message []byte) (K, C kyber.Point, remainder []byte,
 // See https://arxiv.org/pdf/2205.08529.pdf / section 5.4 Protocol / step 1
 func (a *Actor) VerifiableEncrypt(message []byte, GBarAbort kyber.Point) (ciphertext types.Ciphertext,
 	remainder []byte, err error) {
+	//remove GBarAbort in all places
 
 	if !a.startRes.Done() {
 		return types.Ciphertext{}, nil, xerrors.Errorf("you must first initialize " +
@@ -289,27 +290,21 @@ func (a *Actor) VerifiableEncrypt(message []byte, GBarAbort kyber.Point) (cipher
 // since we need the identity of the participants, we need to pass the cothority to have the public keys
 // suite is the global suite and we don't need to pass it here. When migrate to the new version, check that suite will be accessed.
 // pubs are inside the cothority, just pass the cothority and get the public keys. TODO: preprare a function to get the public keys
-func (a *Actor) RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.PubVerShare, *share.PubPoly, kyber.Point,
-	kyber.Scalar, error) {
-	hash := sha256.New()
-	// TODO: Check if this is safe
-	h := suite.Point().Pick(suite.XOF(hash.Sum(nil)))
+func (a *Actor) RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.PubVerShare, *share.PubPoly, kyber.Scalar, error) {
 
-	//we can also use the gbar!
-	// agreedData := make([]byte, 32)
-	// _, err := rand.Read(agreedData)
-	// h := suite.Point().Embed(agreedData, keccak.New(agreedData))
+	h := GBar
 
 	// what is the length of the secret? Should this be consistent with the definition in F3B? TODO: check this
 	secret := suite.Scalar().Pick(suite.RandomStream())
 
 	// here we get the public keys directly from the states
 	pubkeys := a.startRes.getPublicKeys()
-	// fmt.Println(pubkeys)
 	// start := time.Now()
 
 	//notice that here the h will be used for decryption, so we need to publish it. In this case, it is important to consider where to generate h and how to publish it.
 	shares, poly, err := pvss.EncShares(suite, h, pubkeys, secret, t)
+	// _, commit := poly.Info()
+	// In poly, g is suite and b is gbar, only the commit is needed to be store in transactions.
 	//check the length of shares and poly
 	// lenShare := len(shares) * (len(shares[0].S.V.String()) + 8 + len(shares[0].P.C.String()) + len(shares[0].P.R.String()) + len(shares[0].P.VG.String()) + len(shares[0].P.VH.String()))
 
@@ -346,23 +341,12 @@ func (a *Actor) RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.Pu
 
 	if err != nil {
 		fmt.Println("error in RUNPVSS", err)
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	//I think I don't need the proof here, however this might be the same as what I left unimplemented in the decrypt function.
-	// proofs := make([]kyber.Point, n)
-	// for i := 0; i < n; i++ {
-	// 	proofs[i] = poly.Eval(shares[i].S.I).V
-	// }
-
-	return shares, poly, h, secret, nil
+	return shares, poly, secret, nil
 }
 
-// here it is expected to implement the PVSSdec function.
-// generally it can be divided into two parts: 1. verify the proof and decrypt share 2. reconstruct the secret
-// we use DecShare in the pvss package to get dec shres, and run recoverSecret to get the secret
-// For now, we implement everything here. Notice that when calculating the delay, there should be a process in which shares are publeshed and collected for recover. I'm not sure about the communication cost
-// ATTENTION! THE DECSHARE FUNC IN PVSS PACKAGE IS FOR PER ACTOR AND SHOULD BE USED IN THE handler!
 // using cothority to replace X the public keys of the participants.
 // x is the private key of the participants. This is stored in the Pedersen struct. It remains to be seen what is the best way to get the private key.
 // in the handler x can be directly accessed? So here we do not need to pass the argument x. TODO: check this
@@ -375,10 +359,8 @@ func (a *Actor) RunPVSS(n int, t int, co crypto.CollectiveAuthority) ([]*pvss.Pu
 //	}
 //
 // use the above code to get sH. TODO: check where to put this. Might better use it inside of the handler.
-// The DecPVSS function used to communicate with all actors, and the specific actions will be implemented in the handler.
-// Notice here, the encShare argument should be [][]*pvss.PubVerShare, because of the batch process. codes need to be checked agian for this.
-func (a *Actor) DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvss.PubVerShare) ([][]byte, int64, int64, error) {
-
+func (a *Actor) DecPVSS(pubpoly *share.PubPoly, encShare [][]*pvss.PubVerShare) ([][]byte, int64, int64, error) {
+	//remove H because it's stored globally
 	if !a.startRes.Done() {
 		return nil, 0, 0, xerrors.Errorf("you must first initialize DKG. " +
 			"Did you call setup() first?")
@@ -404,9 +386,13 @@ func (a *Actor) DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvs
 		addrs = append(addrs, iterator.GetNext())
 	}
 
+	//adding support for batch process
+	batchsize := len(encShare)
+	workerNum := workerNumSlice[int64(math.Log2(float64(batchsize)))]
+
 	//send the whole shares to all participants
-	//final step, include the proof and H in the message so that the receiver can verify the proof and decrypt the share
-	message := types.NewDecPVSSRequest(encShare[0])
+	// revise this by using the batch process. also include the proof.
+	message := types.NewDecPVSSRequest(encShare)
 
 	start := time.Now()
 
@@ -415,24 +401,18 @@ func (a *Actor) DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvs
 		return nil, 0, 0, xerrors.Errorf("failed to send pvss decrypt request: %v", err)
 	}
 
-	// for i := range addrs {
-	// 	// problem here! I'm sending messages in a for loop, so it cannot be done parallelly. This makes the receive time linearly increasing.
-	// 	message := types.NewDecPVSSRequest([]*pvss.PubVerShare{encShare[0][i]})
-
-	// 	err = <-sender.Send(message, addrs[i])
-
-	// 	if err != nil {
-	// 		fmt.Println("error", err)
-	// 		return nil, 0, 0, xerrors.Errorf("failed to send verifiable decrypt request: %v", err)
-	// 	}
-	// }
-
-	//check what kinds of message we need to receive. TODO: check this
 	//check here, add the verification of the proof.
 
 	threshold := a.startRes.getThreshold()
-	decShares := make([]*pvss.PubVerShare, threshold)
-	encShares := make([]*pvss.PubVerShare, threshold)
+	//initialize decShares and encShares
+	decShares := make([][]*pvss.PubVerShare, batchsize)
+	encShares := make([][]*pvss.PubVerShare, batchsize)
+	for i := range encShares {
+		encShares[i] = make([]*pvss.PubVerShare, threshold)
+		decShares[i] = make([]*pvss.PubVerShare, threshold)
+	}
+	// fmt.Println("EncShare: ", encShare)
+
 	pubKeys := make([]kyber.Point, threshold)
 
 	// receive decrypt reply from the nodes
@@ -455,39 +435,62 @@ func (a *Actor) DecPVSS(H kyber.Point, pubpoly *share.PubPoly, encShare [][]*pvs
 
 		// fmt.Println(decShare.GetDecShares()[0].S)
 		position := decShare.GetIndex()
-		encShares[i] = encShare[0][position]
-		decShares[i] = decShare.GetDecShares()[0]
+		// fmt.Println("position: ", position)
+		// index the batched shares into the corresponding position
+		for j := 0; j < batchsize; j++ {
+			encShares[j][i] = encShare[j][position]
+			decShares[j][i] = decShare.GetDecShares()[j]
+		}
+		// encShares[i] = encShare[0][position]
+		// decShares[i] = decShare.GetDecShares()[0]
 		pubKeys[i] = a.startRes.getPublicKeys()[position]
 		// decShares[position] = decShare.GetDecShares()[0]
 	}
-	// fmt.Println("decPVSSShare 0: ", decPVSSShare[0])
 
-	// here in decrypt it is already achieved locally without message stream.
-	// in verifiabledecrypt here is a verification process and reconstruction.
-	// again worker is made for batch process. maybe we can just use a single function at first.
 	// the RecoverCommit runs the Lagrange interpolation on the shares to recover the secret. arguments are t and n.
 	receivingSharesTime := time.Since(start).Milliseconds()
 	start = time.Now()
 
-	res, err := pvss.RecoverSecret(suite, suite.Point().Base(), pubKeys, encShares, decShares, threshold, len(addrs))
-	// res, err := pvss.RecoverSecret(suite, suite.Point().Base(), a.startRes.getPublicKeys(), encShare[0], decShares, len(addrs), len(addrs))
+	// the final decrypted message
+	decryptedSecret := make([][]byte, batchsize)
 
-	if err != nil {
-		return [][]byte{}, 0, 0, xerrors.Errorf("failed to recover commit: %v", err)
+	var wgBatchReply sync.WaitGroup
+	jobChan := make(chan int)
+
+	go func() {
+		for i := 0; i < batchsize; i++ {
+			jobChan <- i
+		}
+
+		close(jobChan)
+	}()
+
+	if batchsize < workerNum {
+		workerNum = batchsize
 	}
-	// fmt.Println("res: ", res)
-	// fmt.Println("err", err)
-	buf, err := deriveKey(res)
-	if err != nil {
-		return [][]byte{}, 0, 0, xerrors.Errorf("failed to derive key: %v", err)
+
+	worker := newWorkerPVSS(len(addrs), threshold, pubKeys, decryptedSecret, decShares, encShares)
+
+	for i := 0; i < workerNum; i++ {
+		wgBatchReply.Add(1)
+
+		go func() {
+			defer wgBatchReply.Done()
+			for j := range jobChan {
+				err := worker.workPVSS(j)
+				if err != nil {
+					dela.Logger.Err(err).Msgf("error in a worker")
+				}
+			}
+		}()
 	}
-	deckey := buf[:32]
-	// fmt.Println("dec_key: ", deckey)
+
+	wgBatchReply.Wait()
 
 	// count the time for decryption
 	decryptionTime := time.Since(start).Milliseconds()
 
-	return [][]byte{deckey}, receivingSharesTime, decryptionTime, nil
+	return decryptedSecret, receivingSharesTime, decryptionTime, nil
 }
 
 // Decrypt implements dkg.Actor. It gets the private shares of the nodes and
@@ -596,8 +599,6 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 	// fmt.Println(ciphertexts)
 	// Here the batchsize is predefined in test file, every ciphertext contains 6 data as defined, K,C,U...
 	batchsize := len(ciphertexts)
-	// fmt.Println(batchsize)
-	// when batchsize is 4096 or bigger, directly set workerNum to 12, else, as original
 	workerNum := workerNumSlice[int64(math.Log2(float64(batchsize)))]
 
 	message := types.NewVerifiableDecryptRequest(ciphertexts)
@@ -680,6 +681,52 @@ func (a *Actor) VerifiableDecrypt(ciphertexts []types.Ciphertext) ([][]byte, int
 	decryptionTime := time.Since(start).Milliseconds()
 
 	return decryptedMessage, receivingSharesTime, decryptionTime, nil
+}
+
+// define worker for pvss
+func newWorkerPVSS(numParticipants int, threshold int, publicKeys []kyber.Point, decSecrets [][]byte,
+	decShares [][]*pvss.PubVerShare, encShares [][]*pvss.PubVerShare) workerPVSS {
+
+	return workerPVSS{
+		numParticipants: numParticipants,
+		threshold:       threshold,
+		publicKeys:      publicKeys,
+		decSecrets:      decSecrets,
+		decShares:       decShares,
+		encShares:       encShares,
+	}
+}
+
+// define worker for pvss
+type workerPVSS struct {
+	numParticipants int
+	threshold       int
+	publicKeys      []kyber.Point
+	decSecrets      [][]byte
+	decShares       [][]*pvss.PubVerShare
+	encShares       [][]*pvss.PubVerShare
+}
+
+// implement work function for pvss
+func (w workerPVSS) workPVSS(jobIndex int) error {
+	//check encshares and decshares again
+	// fmt.Println("encshares:", w.encShares[jobIndex])
+	// fmt.Println("decshares:", w.decShares[jobIndex])
+	res, err := pvss.RecoverSecret(suite, suite.Point().Base(), w.publicKeys, w.encShares[jobIndex], w.decShares[jobIndex], w.threshold, w.numParticipants)
+	if err != nil {
+		fmt.Println("err:", err)
+		return xerrors.Errorf("failed to recover the commit: %v", err)
+	}
+
+	buf, err := deriveKey(res)
+	if err != nil {
+		return xerrors.Errorf("failed to derive key: %v", err)
+	}
+	deckey := buf[:32]
+
+	w.decSecrets[jobIndex] = deckey
+
+	return nil
 }
 
 func newWorker(numParticipants int, threshold int, decryptedMessage [][]byte,

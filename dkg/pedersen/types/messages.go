@@ -482,30 +482,26 @@ func (req VerifiableDecryptRequest) Serialize(ctx serde.Context) ([]byte, error)
 // DecPVSSRequest is a message sent to request a decryption of pvss shares.
 // - implements serde.Message
 type DecPVSSRequest struct {
-	encShares []*pvss.PubVerShare
+	encShares [][]*pvss.PubVerShare
 }
 
 // NewDecPVSSRequest creates a new decryption request.
-func NewDecPVSSRequest(encShares []*pvss.PubVerShare) DecPVSSRequest {
+func NewDecPVSSRequest(encShares [][]*pvss.PubVerShare) DecPVSSRequest {
 	return DecPVSSRequest{
 		encShares: encShares,
 	}
 }
 
 // GetEncShares returns EncShares.
-func (req DecPVSSRequest) GetEncShares() []*pvss.PubVerShare {
+func (req DecPVSSRequest) GetEncShares() [][]*pvss.PubVerShare {
 	return req.encShares
 }
 
 // Serialize implements serde.Message.
 func (req DecPVSSRequest) Serialize(ctx serde.Context) ([]byte, error) {
 	format := msgFormats.Get(ctx.GetFormat())
-	// fmt.Println("yyyy", format)
-	// fmt.Println("req", req)
-	// fmt.Println("ctx", ctx)
-	//bugs here?!why is data the same for every request?
 	data, err := format.Encode(ctx, req)
-	// fmt.Println("serialize: ", data, err)
+
 	if err != nil {
 		return nil, xerrors.Errorf("couldn't encode decrypt request: %v", err)
 	}

@@ -9,7 +9,6 @@ import (
 	"os"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -20,6 +19,7 @@ import (
 	"go.dedis.ch/dela/mino/router/tree"
 
 	"go.dedis.ch/kyber/v3"
+	"go.dedis.ch/kyber/v3/share"
 	"go.dedis.ch/kyber/v3/share/pvss"
 )
 
@@ -32,7 +32,7 @@ func init() {
 func Test_PVSS_records(t *testing.T) {
 	// minoch is simulated communication, and grpc is more realistic and should be used here
 
-	file, err := os.OpenFile("PVSS_records.csv", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
+	file, err := os.OpenFile("PVSS_records_thru.csv", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
 	defer file.Close()
 	if err != nil {
 		log.Fatalln("failed to open file", err)
@@ -44,6 +44,7 @@ func Test_PVSS_records(t *testing.T) {
 		panic("not n right argument")
 	}
 
+	batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1204}
 	// setting up the dkg
 	// n := 128
 	threshold := n/2 + 1
@@ -53,11 +54,6 @@ func Test_PVSS_records(t *testing.T) {
 	minos := make([]mino.Mino, n)
 	dkgs := make([]dkg.DKG, n)
 	addrs := make([]mino.Address, n)
-
-	// Here I wonder if we need the gbar for pvss. After all we don't run the DKG setup, maybe a random generator is fine?
-	agreedData := make([]byte, 32)
-	_, err = rand.Read(agreedData)
-	require.NoError(t, err)
 
 	fmt.Printf("initiating the dkg nodes ...")
 
@@ -95,47 +91,84 @@ func Test_PVSS_records(t *testing.T) {
 	}
 
 	fmt.Printf("setting up the dkg ...")
-	start := time.Now()
+	// start := time.Now()
 	_, err = actors[0].Setup(fakeAuthority, threshold)
 	require.NoError(t, err)
-	setupTime := time.Since(start)
+	// setupTime := time.Since(start)
 	//This setup time should be much smaller than DKG setup time
 
-	// here we dont need batch
-	fmt.Printf("generaing the encrypted key shares ...")
+	// start = time.Now()
+	// add batch test support
+	for _, batchSize := range batchSizeSlice {
+		t.Logf("=== starting the process with batch size = %d === \n", batchSize)
+		fmt.Printf("=== starting the process with batch size = %d === \n", batchSize)
+		var batchShares [][]*pvss.PubVerShare
+		var batchPubPoly []*share.PubPoly
+		var batchEnckey [][]byte
+		var pubpoly *share.PubPoly
+		for i := 0; i < batchSize; i++ {
+			shares, pubpoly, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
+			require.NoError(t, err)
+			shared := suite.Point().Mul(symkey, nil)
+			buf, err := deriveKey(shared)
+			enckey := buf[:KEY_LENGTH]
+			batchShares = append(batchShares, shares)
+			batchPubPoly = append(batchPubPoly, pubpoly)
+			batchEnckey = append(batchEnckey, enckey)
+		}
 
-	start = time.Now()
-	shares, pubpoly, h, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
-	encryptTime := time.Since(start).Milliseconds()
-	// fmt.Println("encrypt time is: ", encryptTime)
-	shared := suite.Point().Mul(symkey, nil)
-	buf, err := deriveKey(shared)
-	enckey := buf[:KEY_LENGTH]
-	// fmt.Println("enckey", enckey)
-	//I want to calculate the data size of the shares, and pubpoly
-	// fmt.Println("shares size is: ", len(shares))
-	// fmt.Println("shares size is: ", *shares[0])
-	// fmt.Println("pubpoly size is: ", len(pubboly))
+		// encryptTime := time.Since(start)
 
-	fakebatchShares := [][]*pvss.PubVerShare{shares} // change codes later to just remove the batch
-	fmt.Printf("decrypting the key shares ...")
-	start = time.Now()
-	decKey, rcvTime, decTime, err := actors[0].DecPVSS(h, pubpoly, fakebatchShares)
-	decryptionTime := time.Since(start).Milliseconds()
-	require.NoError(t, err)
+		t.Log("decrypting the key shares ...")
+		fmt.Printf("decrypting the key shares ...")
+		// start = time.Now()
+		//decPVSS need to be modified to support batch decryption for pubpoly
+		decKey, rcvTime, decTime, err := actors[0].DecPVSS(pubpoly, batchShares)
+		// decryptionTime := time.Since(start)
+		require.NoError(t, err)
 
-	require.Equal(t, enckey, decKey[0])
-	row = append(row, strconv.Itoa(int(encryptTime)))
-	row = append(row, strconv.Itoa(int(rcvTime)))
-	row = append(row, strconv.Itoa(int(decTime)))
-	row = append(row, strconv.Itoa(int(decryptionTime)))
+		require.Equal(t, batchEnckey, decKey)
+
+		// row = append(row, strconv.Itoa(int(encryptTime))) // in throughput test, we don't need encryption time
+		row = append(row, strconv.Itoa(int(rcvTime)))
+		row = append(row, strconv.Itoa(int(decTime)))
+		// row = append(row, strconv.Itoa(int(decryptionTime)))
+
+		// t.Logf("n=%d, encryption time=%s, decryption time=%s, "+
+		// 	"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
+		// 	decryptionTime, setupTime, rcvTime, decTime)
+		// fmt.Printf("n=%d, encryption time=%s, decryption time=%s, "+
+		// 	"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
+		// 	decryptionTime, setupTime, rcvTime, decTime)
+	}
+
+	// start = time.Now()
+	// shares, pubpoly, symkey, err := actors[0].RunPVSS(n, threshold, fakeAuthority)
+	// encryptTime := time.Since(start).Milliseconds()
+	// // fmt.Println("encrypt time is: ", encryptTime)
+	// shared := suite.Point().Mul(symkey, nil)
+	// buf, err := deriveKey(shared)
+	// enckey := buf[:KEY_LENGTH]
+
+	// fakebatchShares := [][]*pvss.PubVerShare{shares} // change codes later to just remove the batch
+	// fmt.Printf("decrypting the key shares ...")
+	// start = time.Now()
+	// decKey, rcvTime, decTime, err := actors[0].DecPVSS(pubpoly, fakebatchShares)
+	// decryptionTime := time.Since(start).Milliseconds()
+	// require.NoError(t, err)
+
+	// require.Equal(t, enckey, decKey[0])
+	// row = append(row, strconv.Itoa(int(encryptTime)))
+	// row = append(row, strconv.Itoa(int(rcvTime)))
+	// row = append(row, strconv.Itoa(int(decTime)))
+	// row = append(row, strconv.Itoa(int(decryptionTime)))
 
 	if err := w.Write(row); err != nil {
 		log.Fatalln("error writing record to file", err)
 	}
 	w.Flush()
 
-	fmt.Printf("n=%d, encryption time=%d, decryption time=%d, "+
-		"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
-		decryptionTime, setupTime, rcvTime, decTime)
+	// fmt.Printf("n=%d, encryption time=%d, decryption time=%d, "+
+	// 	"setup time=%s, rcvTime=%d, decTime=%d", n, encryptTime,
+	// 	decryptionTime, setupTime, rcvTime, decTime)
 }
