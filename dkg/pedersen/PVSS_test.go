@@ -103,10 +103,10 @@ func Test_RunPVSS(t *testing.T) {
 func Test_PVSS_minogrpc(t *testing.T) {
 	// minoch is simulated communication, and grpc is more realistic and should be used here
 
-	batchSizeSlice := []int{64}
+	batchSizeSlice := []int{512}
 
 	// setting up the dkg
-	n := 4
+	n := 128
 	threshold := n/2 + 1
 
 	minos := make([]mino.Mino, n)

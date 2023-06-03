@@ -44,7 +44,7 @@ func Test_PVSS_records(t *testing.T) {
 		panic("not n right argument")
 	}
 
-	batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1204}
+	batchSizeSlice := []int{1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048}
 	// setting up the dkg
 	// n := 128
 	threshold := n/2 + 1

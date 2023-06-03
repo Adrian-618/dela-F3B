@@ -439,10 +439,7 @@ func (h *Handler) start(ctx context.Context, start types.Start, deals cryChan[ty
 
 	h.startRes.init(start.GetAddresses(), start.GetPublicKeys(), start.GetThreshold())
 
-	// starttime := time.Now()
 	err = h.doDKG(ctx, deals, resps, out, from)
-	// setupTime := time.Since(starttime).Milliseconds()
-	// fmt.Println("setupTime is: ", setupTime)
 	if err != nil {
 		xerrors.Errorf("something went wrong during DKG: %v", err)
 	}
@@ -589,13 +586,13 @@ func (h *Handler) certify(ctx context.Context, resps cryChan[types.Response], ex
 
 		_, err = h.dkg.ProcessResponse(&resp)
 		if err != nil {
-			return xerrors.Errorf("failed to process response: %v", err)
 		}
 
 		responsesReceived++
 
 		h.log.Trace().Int("total", responsesReceived).Msg("response processed")
 	}
+	fmt.Println("responses received: ", responsesReceived, " expected: ", expected)
 
 	if !h.dkg.Certified() {
 		return xerrors.New("node is not certified")
@@ -829,6 +826,7 @@ func (h *Handler) doReshare(ctx context.Context, start types.StartResharing,
 	// All nodes should certify.
 	err := h.certify(ctx, resps, expectedResponses)
 	if err != nil {
+		fmt.Println("failed to certify", err)
 		return xerrors.Errorf("failed to certify: %v", err)
 	}
 
@@ -844,6 +842,7 @@ func (h *Handler) doReshare(ctx context.Context, start types.StartResharing,
 	if err != nil {
 		return xerrors.Errorf("failed to announce dkg public key: %v", err)
 	}
+	fmt.Println("Resharing completed successfully")
 
 	return nil
 }
@@ -1133,6 +1132,12 @@ func (h *Handler) handleDecPVSS(out mino.Sender,
 	var EncShares []*pvss.PubVerShare
 
 	for _, encShare := range EncSharesAll {
+		//this is for pvss throughput test
+		if len(encShare) == 1 {
+			EncShares = append(EncShares, encShare[0])
+			continue
+		}
+		//else do below
 		EncShares = append(EncShares, encShare[pos])
 	}
 
@@ -1211,26 +1216,6 @@ func (h *Handler) pvssDecryption(encShare *pvss.PubVerShare) (*pvss.PubVerShare,
 		return nil, err
 	}
 	ds := &pvss.PubVerShare{*ps, *P}
-	return ds, nil
-}
-
-// DecShare decrypts the encrypted share and returns the decrypted share and proof.
-// Now for simplicity I'm not verify the encShare
-// This function is modified from pvss package
-func DecPVSSShare(x kyber.Scalar, encShares []*pvss.PubVerShare) ([]*pvss.PubVerShare, error) {
-	//here needs a verify process
-	G := suite.Point().Base()
-	//quick hack for batch decryption
-	var ds []*pvss.PubVerShare
-	for _, encShare := range encShares {
-		V := suite.Point().Mul(suite.Scalar().Inv(x), encShare.S.V) // decryption: x^{-1} * (xS)
-		ps := &share.PubShare{I: encShare.S.I, V: V}
-		P, _, _, err := dleq.NewDLEQProof(suite, G, V, x)
-		if err != nil {
-			return nil, err
-		}
-		ds = append(ds, &pvss.PubVerShare{*ps, *P})
-	}
 	return ds, nil
 }
 

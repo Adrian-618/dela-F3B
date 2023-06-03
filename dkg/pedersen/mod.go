@@ -390,16 +390,30 @@ func (a *Actor) DecPVSS(pubpoly *share.PubPoly, encShare [][]*pvss.PubVerShare) 
 	batchsize := len(encShare)
 	workerNum := workerNumSlice[int64(math.Log2(float64(batchsize)))]
 
-	//send the whole shares to all participants
-	// revise this by using the batch process. also include the proof.
-	message := types.NewDecPVSSRequest(encShare)
+	//for pvss, when the shares batchsize is too big, it's hard to send them all to everyone, so we split the shares for each participant and loop to send it
+	//this is used for testing the throughput with huge batchsizes.
+	//for every participant index by the pubkey i, we need encShare[j][i] for j in range(batchsize)
+	// start := time.Now()
+	// for i := 0; i < len(addrs); i++ {
+	// 	encShareSlice := make([][]*pvss.PubVerShare, batchsize)
+	// 	for j := 0; j < batchsize; j++ {
+	// 		encShareSlice[j] = []*pvss.PubVerShare{encShare[j][i]}
+	// 	}
+	// 	message := types.NewDecPVSSRequest(encShareSlice)
+	// 	err = <-sender.Send(message, addrs[i])
+	// 	if err != nil {
+	// 		return nil, 0, 0, xerrors.Errorf("failed to send pvss decrypt request: %v", err)
+	// 	}
+	// }
 
-	start := time.Now()
+	//send the whole shares to all participants
+	message := types.NewDecPVSSRequest(encShare)
 
 	err = <-sender.Send(message, addrs...)
 	if err != nil {
 		return nil, 0, 0, xerrors.Errorf("failed to send pvss decrypt request: %v", err)
 	}
+	start := time.Now()
 
 	//check here, add the verification of the proof.
 
@@ -865,6 +879,7 @@ func (a *Actor) Reshare(co crypto.CollectiveAuthority, thresholdNew int) error {
 
 	// Wait for receiving the response from the new nodes
 	for i := 0; i < len(addrsAll); i++ {
+		fmt.Println("waiting for response from new nodes", i)
 		src, msg, err := receiver.Recv(ctx)
 		if err != nil {
 			return xerrors.Errorf("stream stopped unexpectedly: %v", err)

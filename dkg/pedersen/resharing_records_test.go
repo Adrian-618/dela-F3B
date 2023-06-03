@@ -74,8 +74,8 @@ func TestResharingRecords(t *testing.T) {
 	fmt.Println("==============  starting the dkg ============== ")
 	fmt.Println("n old = ", nOld, " n common = ", nCommon, " n new = ", nNew)
 
-	thresholdOld := nOld
-	thresholdNew := nCommon + nNew
+	thresholdOld := nOld / 2
+	thresholdNew := (nCommon + nNew) / 2
 	/////////////////////////////////////////////////// second loop ////////////////////////////////////////////
 
 	minosOld := make([]mino.Mino, nOld)
