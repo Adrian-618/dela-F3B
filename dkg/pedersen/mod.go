@@ -879,7 +879,7 @@ func (a *Actor) Reshare(co crypto.CollectiveAuthority, thresholdNew int) error {
 
 	// Wait for receiving the response from the new nodes
 	for i := 0; i < len(addrsAll); i++ {
-		fmt.Println("waiting for response from new nodes", i)
+		// fmt.Println("waiting for response from new nodes", i)
 		src, msg, err := receiver.Recv(ctx)
 		if err != nil {
 			return xerrors.Errorf("stream stopped unexpectedly: %v", err)

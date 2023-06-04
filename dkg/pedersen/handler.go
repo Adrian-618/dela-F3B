@@ -571,9 +571,9 @@ func (h *Handler) certify(ctx context.Context, resps cryChan[types.Response], ex
 	for responsesReceived < expected {
 		msg, err := resps.pop(ctx)
 		if err != nil {
+			fmt.Println("context done: ", err)
 			return xerrors.Errorf("context done: %v", err)
 		}
-
 		resp := pedersen.Response{
 			Index: msg.GetIndex(),
 			Response: &vss.Response{
@@ -586,13 +586,13 @@ func (h *Handler) certify(ctx context.Context, resps cryChan[types.Response], ex
 
 		_, err = h.dkg.ProcessResponse(&resp)
 		if err != nil {
+			fmt.Println("error processing response: ", err)
 		}
 
 		responsesReceived++
 
 		h.log.Trace().Int("total", responsesReceived).Msg("response processed")
 	}
-	fmt.Println("responses received: ", responsesReceived, " expected: ", expected)
 
 	if !h.dkg.Certified() {
 		return xerrors.New("node is not certified")
@@ -814,19 +814,22 @@ func (h *Handler) doReshare(ctx context.Context, start types.StartResharing,
 
 	// Note that a node can be old and common
 	if isOldNode {
-		expectedResponses = (start.GetTNew()) * len(h.startRes.getParticipants())
+		//check if this is correct
+		expectedResponses = (len(h.startRes.getParticipants())) * len(h.startRes.getParticipants())
 	}
 	if isCommonNode {
-		expectedResponses = (start.GetTNew() - 1) * len(addrsOld)
+		//check if this is correct
+		expectedResponses = (len(h.startRes.getParticipants()) - 1) * len(addrsOld)
 	}
 	if isNewNode {
-		expectedResponses = (start.GetTNew() - 1) * start.GetTOld()
+		//check if this is correct
+		expectedResponses = (len(h.startRes.getParticipants()) - 1) * len(h.startRes.getParticipants())
 	}
 
 	// All nodes should certify.
 	err := h.certify(ctx, resps, expectedResponses)
 	if err != nil {
-		fmt.Println("failed to certify", err)
+		fmt.Println("failed to certify", err, isCommonNode, isNewNode, isOldNode)
 		return xerrors.Errorf("failed to certify: %v", err)
 	}
 
@@ -842,7 +845,7 @@ func (h *Handler) doReshare(ctx context.Context, start types.StartResharing,
 	if err != nil {
 		return xerrors.Errorf("failed to announce dkg public key: %v", err)
 	}
-	fmt.Println("Resharing completed successfully")
+	// fmt.Println("Resharing completed successfully")
 
 	return nil
 }

@@ -74,8 +74,8 @@ func TestResharingRecords(t *testing.T) {
 	fmt.Println("==============  starting the dkg ============== ")
 	fmt.Println("n old = ", nOld, " n common = ", nCommon, " n new = ", nNew)
 
-	thresholdOld := nOld / 2
-	thresholdNew := (nCommon + nNew) / 2
+	thresholdOld := nOld / 2             //4
+	thresholdNew := (nCommon + nNew) / 2 //5
 	/////////////////////////////////////////////////// second loop ////////////////////////////////////////////
 
 	minosOld := make([]mino.Mino, nOld)
@@ -206,7 +206,10 @@ func TestResharingRecords(t *testing.T) {
 	require.NoError(t, err)
 
 	// fmt.Println("============== verifying the process ==============")
-
+	messageNew := []byte("Hello worl")
+	K1, C1, remainder1, err := actorsNew[0].Encrypt(messageNew)
+	require.NoError(t, err, "encrypting the message was not successful")
+	require.Len(t, remainder1, 0)
 	for _, actorNew := range actorsNew {
 		newPubKey, err := actorNew.GetPublicKey()
 
@@ -214,8 +217,10 @@ func TestResharingRecords(t *testing.T) {
 		require.NoError(t, err, "the public key should remain the same")
 		newPubKey.Equal(oldPubKey)
 		decrypted, err := actorNew.Decrypt(K, C)
+		decrypted1, err := actorNew.Decrypt(K1, C1)
 		require.NoError(t, err, "decryption was not successful")
 		require.Equal(t, message, decrypted, "the new committee should be able to decrypt the messages encrypted by the old committee")
+		require.Equal(t, messageNew, decrypted1, "the new committee should be able to decrypt the NEW messages encrypted by the new committee")
 	}
 
 	recordSlice := []string{strconv.Itoa(nOld), strconv.Itoa(nCommon), strconv.Itoa(nNew),
